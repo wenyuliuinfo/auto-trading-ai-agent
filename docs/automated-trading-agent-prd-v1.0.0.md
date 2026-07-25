@@ -3,7 +3,7 @@
 
 | Meta | Detail |
 |---|---|
-| **Status** | Draft v1.0 |
+| **Status** | Draft v1.0.0 |
 | **Author** | Product Management |
 | **Date** | 2026-07-23 |
 | **Target Release** | Q4 2026 (MVP: Theme Classifier + Compliance Overlay) |
