@@ -9,7 +9,7 @@
 
 ### Positioning Statement
 
-> For **financial advisors at large warehouse/broker-dealer teams** who need to respond to **client-driven theme requests** (AI, clean energy, defense) with specific, timely trades, the **Automated Trading Agent** is a **theme-to-execution platform** that translates a theme into compliant, executable trade baskets across client portfolios in minutes — unlike fragmented research tools and OMS platforms that leave advisors stuck between hours of manual screening and missed market windows.
+> For **financial advisors at large wirehouse/broker-dealer teams** who need to respond to **client-driven theme requests** (AI, clean energy, defense) with specific, timely trades, the **Automated Trading Agent** is a **theme-to-execution platform** that translates a theme into compliant, executable trade baskets across client portfolios in minutes — unlike fragmented research tools and OMS platforms that leave advisors stuck between hours of manual screening and missed market windows.
 
 ### Target Persona
 
@@ -110,7 +110,7 @@ Problem: Translate client trends → compliant, executable trade baskets, fast
 | Element | Plan |
 |---|---|
 | **Format** | Side-by-side comparison sessions (30 min per advisor) |
-| **Sample** | 10-15 advisors across 2-3 warehouse teams |
+| **Sample** | 10-15 advisors across 2-3 wirehouse teams |
 | **Setup** | Give advisors a theme prompt. Time their manual basket build (current tools). Then show AI-generated basket — time their review. |
 | **Primary Metric** | ≥80% overlap between advisor picks and AI picks |
 | **Secondary** | Time-to-basket ≤5 min vs. 2-4 hrs manual |
@@ -226,7 +226,7 @@ Q2-Q3                    ┌─────┴──────┐
 
 | Artifact | Summary |
 |---|---|
-| **Target User** | Financial advisors at large warehouse/broker-dealer teams |
+| **Target User** | Financial advisors at large wirehouse/broker-dealer teams |
 | **Use Case** | Theme-based investing — client says "AI," agent picks securities |
 | **Problem** | Double translation gap: trend→securities→compliant execution, all manual |
 | **Differentiation** | Proprietary AI classification + compliance-first design |
