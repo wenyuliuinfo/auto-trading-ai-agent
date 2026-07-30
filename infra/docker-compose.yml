@@ -1,0 +1,183 @@
+name: thematic-basket-system
+
+networks:
+  backend-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  langfuse_db_data:
+  prometheus_data:
+  grafana_data:
+  tempo_data:
+
+services:
+
+  # ---------------------------------------------------------------------
+  # Domain database: themes, runs, candidates, analyst_reports,
+  # factor_panel, rankings, baskets, reports, basket_performance.
+  # Also hosts the LangGraph PostgresSaver checkpoint tables (separate
+  # schema, same instance) — see ARCHITECTURE.md §2.1.
+  # ---------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-thematic_basket}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Place your DDL from ARCHITECTURE.md §2.1 here to auto-run on first boot:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-thematic_basket}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [backend-net]
+
+  pinecone-local:
+    image: ghcr.io/pinecone-io/pinecone-local:latest
+    container_name: pinecone-local
+    platform: linux/amd64
+    environment:
+      PORT: 5080
+      PINECONE_HOST: localhost
+    ports:
+      - "5080-5090:5080-5090"
+
+  # ---------------------------------------------------------------------
+  # Redis: Celery broker/result backend + tool-call cache layer.
+  # Chosen over Kafka — see ARCHITECTURE.md §7 (no multi-consumer
+  # streaming need at current scale).
+  # ---------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [backend-net]
+
+  # ---------------------------------------------------------------------
+  # FastAPI: API layer. Enqueues runs to Celery, never executes the
+  # LangGraph pipeline synchronously in a request handler.
+  # Replace `build.context` with your actual backend project path.
+  # ---------------------------------------------------------------------
+  fastapi:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fastapi
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-thematic_basket}
+      REDIS_URL: redis://redis:6379/0
+      LANGFUSE_HOST: http://langfuse:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [backend-net]
+
+  # ---------------------------------------------------------------------
+  # Celery worker: runs the LangGraph pipeline (Screener → fan-out
+  # Analyst → Modeling → Validator → Trader → Report). Scale replicas
+  # to increase fan-out throughput across runs.
+  # Same image as fastapi; only the container command differs.
+  # ---------------------------------------------------------------------
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: celery-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "app.worker", "worker", "--loglevel=info", "--concurrency=4"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-thematic_basket}
+      REDIS_URL: redis://redis:6379/0
+      LANGFUSE_HOST: http://langfuse:3000
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [backend-net]
+    deploy:
+      replicas: 1   # increase for more parallel run throughput; Analyst fan-out concurrency is controlled inside the worker, not by replica count alone
+
+  # ---------------------------------------------------------------------
+  # Next.js UI. Replace `build.context` with your actual frontend path.
+  # ---------------------------------------------------------------------
+  nextjs:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nextjs
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - fastapi
+    networks: [backend-net]
+
+  # ---------------------------------------------------------------------
+  # Langfuse: self-hosted LLM/agent tracing (prompts, completions, token
+  # usage, cost, nested spans per Run) — see ARCHITECTURE.md §6.
+  # Uses its OWN dedicated Postgres instance, not the domain DB.
+  # ---------------------------------------------------------------------
+  langfuse-db:
+    image: postgres:15-alpine
+    container_name: langfuse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:?set LANGFUSE_DB_PASSWORD in .env}
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [backend-net]
+
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: langfuse
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD}@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?set LANGFUSE_NEXTAUTH_SECRET in .env}
+      SALT: ${LANGFUSE_SALT:?set LANGFUSE_SALT in .env}
+    ports:
+      - "3001:3000"
+    depends_on:
+      langfuse-db: { condition: service_healthy }
+    networks: [backend-net]
+
+# ---------------------------------------------------------------------
+# NOT containerized here — external managed services referenced by env vars:
+#   - OPENAI_API_KEY / DEEPSEEK_API_KEY  (LLM providers)
+#   - PINECONE_API_KEY                    (managed vector store — no local container)
+#   - Free-tier data vendor keys: FMP, FINNHUB, NEWSAPI, etc.
+# See .env.example for the full list.
+# ---------------------------------------------------------------------
