@@ -29,33 +29,33 @@ and a proposed basket, not investment advice (see §9, Compliance).
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌───────────────────┐
-│  Next.js 16  │◄────►│   FastAPI     │◄────►│  Redis (queue +    │
-│  (UI)        │ SSE/ │  (API layer)  │      │  cache)            │
-└─────────────┘ poll  └──────┬───────┘      └─────────┬─────────┘
-                              │ enqueue run             │ tasks
-                              ▼                         ▼
-                       ┌──────────────────────────────────────┐
-                       │        Celery Worker(s)                │
-                       │  ┌──────────────────────────────────┐  │
-                       │  │     LangGraph Pipeline (§4)        │  │
-                       │  │ Screener→Analyst(xN)→Modeling→     │  │
-                       │  │ Validator→Trader→Report            │  │
-                       │  └───────────┬────────────┬──────────┘  │
-                       └──────────────┼────────────┼─────────────┘
-                                      │            │
-                     ┌────────────────┼────────────┼──────────────┐
-                     ▼                ▼            ▼              ▼
-              ┌────────────┐  ┌──────────────┐ ┌─────────┐  ┌───────────┐
-              │ PostgreSQL │  │ LLM Providers │ │Pinecone │  │ Free data │
-              │ (system of │  │ OpenAI +      │ │(semantic│  │ APIs (§6) │
-              │ record +   │  │ DeepSeek      │ │ search, │  │ FMP/      │
-              │ checkpoint)│  │               │ │ memory) │  │ Finnhub/  │
-              └────────────┘  └──────────────┘ └─────────┘  │ GDELT/etc │
-                                                              └───────────┘
-              ┌──────────────────────┐   ┌───────────────────────────┐
-              │  Langfuse (LLM/agent │   │ Prometheus + Grafana        │
-              │  tracing)            │   │ (infra metrics/dashboards)  │
-              └──────────────────────┘   └───────────────────────────┘
+│  Next.js 16 │◄────►│   FastAPI    │◄────►│  Redis (queue +   │
+│  (UI)       │ SSE/ │  (API layer) │      │  cache)           │
+└─────────────┘ poll └──────┬───────┘      └─────────┬─────────┘
+                            │ enqueue run            │ tasks
+                            ▼                        ▼
+                ┌──────────────────────────────────────┐
+                │        Celery Worker(s)              │
+                │  ┌──────────────────────────────────┐│
+                │  │     LangGraph Pipeline (§4)      ││
+                │  │ Screener→Analyst(xN)→Modeling→   ││
+                │  │ Validator→Trader→Report          ││
+                │  └───────────┬────────────┬─────────┘│
+                └──────────────┼────────────┼──────────┘
+                               │            │
+              ┌────────────────┼────────────┼──────────────┐
+              ▼                ▼            ▼              ▼
+          ┌────────────┐  ┌──────────────┐ ┌─────────┐  ┌───────────┐
+          │ PostgreSQL │  │ LLM Providers│ │Pinecone │  │ Free data │
+          │ (system of │  │ OpenAI +     │ │(semantic│  │ APIs (§6) │
+          │ record +   │  │ DeepSeek     │ │ search, │  │ FMP/      │
+          │ checkpoint)│  │              │ │ memory) │  │ Finnhub/  │
+          └────────────┘  └──────────────┘ └─────────┘  │ GDELT/etc │
+                                                        └───────────┘
+                        ┌──────────────────────┐  
+                        │  Langfuse (LLM/agent │
+                        │  tracing)            │ 
+                        └──────────────────────┘
 ```
 
 **Request flow:** Next.js → `POST /themes/{id}/runs` on FastAPI → FastAPI
@@ -189,15 +189,6 @@ jobs in this system:
 If neither of these is implemented yet, Pinecone should be provisioned but
 not assumed to be doing anything.
 
-### 2.3 MongoDB — not used unless a specific need arises
-
-Do not add MongoDB by default. Postgres JSONB columns (`catalysts`,
-`risks`, `sources`, `factor_contributions`, `caveats`) already cover
-semi-structured agent output. Only introduce Mongo if a genuine need for
-large, schema-inconsistent raw document storage appears (e.g. archiving
-full raw scraped news text) — and if so, scope it to that single
-responsibility, not as a second system of record.
-
 ---
 
 ## 3. API Design (FastAPI)
@@ -209,13 +200,23 @@ responsibility, not as a second system of record.
 | `/themes/{theme_id}/runs` | POST | Trigger a pipeline run for this theme. Enqueues to Celery, returns `{run_id, status: "queued"}` immediately — never runs the graph synchronously in the request handler. |
 | `/runs/{run_id}` | GET | Run status/progress (`queued \| running \| complete \| failed`, plus `progress: {analyzed: 42, total: 120}` while running) |
 | `/runs/{run_id}/events` | GET (SSE) | Streamed progress events for live UI updates, sourced from LangGraph's streaming interface |
-| `/runs/{run_id}/basket` | GET | Final basket (ticker, weight, rank, sub_exposure) once complete |
+| `/runs/{run_id}/basket` | GET | Final basket (ticker, weight, rank, sub_exposure, **composite_score**) once complete |
 | `/runs/{run_id}/report` | GET | Final rationale document (markdown) once complete |
-| `/runs/{run_id}/rankings` | GET | Full ranked list + factor contributions (for transparency/debugging, not just the top 8-10) |
+| `/runs/{run_id}/rankings` | GET | Full ranked list + factor contributions + **composite_score** (for transparency/debugging, not just the top 8-10) |
 
 All write endpoints require auth (see §9). Read endpoints for run status
 may be public within an authenticated session but should still be scoped
 to the requesting user/org, not globally open.
+
+**Contract rule:** `composite_score` is not an optional/debug-only field —
+it must be present on every ticker returned by `/runs/{run_id}/basket`
+and `/runs/{run_id}/rankings`, since the UI displays it directly next to
+each holding (not just in an expandable "details" view) and the Report
+agent's contract (§5.6) depends on it being available in Run state at
+generation time. Any refactor of the `rankings`/`baskets` schema (§2.1)
+must preserve this field's presence — treat dropping or renaming it as a
+breaking API change requiring a version bump, not a routine cleanup.
+
 
 ---
 
@@ -341,28 +342,68 @@ parsing safe.
 **Contract:** theme string + config → `List[CandidateStock]` JSON, no
 ranking or opinion.
 ```
-SystemMessage: You are a Universe Screener for a thematic equity research
-desk. Convert a theme into a bounded, verifiable candidate list — do not
-judge or rank. Decompose into 3-6 sub-exposures, call search_holdings/
-search_sector for each (never invent tickers from memory), dedupe, and
-output 50-150 candidates as JSON: {ticker, company_name, gics_subindustry,
-sub_exposure_tag, market_cap, avg_dollar_volume}. Flag (don't exclude)
-ADV < $5M or market cap < $300M. If a sub-exposure returns <5 candidates,
-say so rather than padding the list.
+SystemMessage:
+
+You are a Universe Screener for a thematic equity research desk. Your job is
+to convert an investment theme into a bounded, verifiable list of candidate
+tickers — not to judge or rank them.
+
+Given a theme (e.g. "grid modernization," "GLP-1 supply chain," "onshoring
+of semiconductor capacity"), you will:
+
+1. Decompose the theme into 3-6 sub-exposures (e.g. for "grid modernization":
+   transmission equipment, smart meters, grid software, utilities capex
+   beneficiaries, battery storage).
+2. For each sub-exposure, call the `search_holdings` and `search_sector`
+   tools to pull constituent tickers from relevant thematic ETFs, GICS
+   sub-industries, and index membership — do not invent tickers from memory.
+3. Deduplicate and output a candidate list of 50-150 US and major
+   international listed equities/ETFs with: ticker, company name, GICS
+   sub-industry, sub-exposure tag, market cap, and average daily dollar
+   volume (for a later liquidity filter).
+4. Flag (but do not exclude) any name with ADV under $5M or market cap
+   under $300M — the Trader agent will apply the final liquidity screen.
+
+Do not include an investment opinion. Do not rank. Output only the
+structured candidate table as JSON matching the provided schema. If a
+sub-exposure returns fewer than 5 candidates, say so explicitly rather than
+padding the list with loosely related names.
 ```
 
 ### 5.2 Analyst
 **Contract:** ticker + theme → `AnalystReport` JSON, every claim sourced.
 ```
-SystemMessage: You are a Thematic Equity Analyst. Given one ticker and a
-theme, call get_news(ticker, lookback_days=90) and get_fundamentals(ticker)
-against connected sources. Score thematic relevance 1-5 with rationale and
-a revenue % estimate. Note catalysts and risks. Output strictly as JSON:
+SystemMessage:
+
+You are a Thematic Equity Analyst. You will receive one ticker at a time
+from a pre-screened candidate universe and a theme definition. Your job is
+to produce a grounded, source-cited analysis — not a recommendation.
+
+For the given ticker:
+
+1. Call `get_news(ticker, lookback_days=90)` against the connected
+   data sources (Morningstar, YCharts, Bloomberg feed) and summarize
+   only what is reported — do not speculate beyond the sources.
+2. Call `get_fundamentals(ticker)` for revenue growth, margin trend,
+   balance sheet leverage, and consensus estimate revisions (last 2
+   quarters).
+3. Assess thematic relevance on a 1-5 scale: does this company's revenue
+   meaningfully derive from the theme, or is the connection tangential?
+   State the % of revenue tied to the theme if disclosed, or your best
+   sourced estimate with a confidence flag if not.
+4. Note near-term catalysts (next 2 quarters: earnings, product launches,
+   regulatory decisions) and key risks (customer concentration, regulatory,
+   competitive, balance sheet).
+
+Output strictly as JSON matching the AnalystReport schema: 
 {ticker, thematic_relevance_score, thematic_relevance_rationale,
-revenue_pct_theme_estimate, catalysts[], risks[], sentiment_label,
-sentiment_evidence[], sources[]}. Every claim must cite a tool-result
-source. Missing data → null with a reason, never filled from general
-knowledge. You are not ranking or selecting stocks.
+ revenue_pct_theme_estimate, catalysts[], risks[], sentiment_label,
+ sentiment_evidence[], sources[]}.
+
+Every factual claim must cite a source from the tool results. If data is
+unavailable for a field, output null and say why — do not fill gaps with
+generic knowledge. You are not selecting or ranking stocks; you are
+building the evidence base another agent will score.
 ```
 
 ### 5.3 Modeling
@@ -370,51 +411,95 @@ knowledge. You are not ranking or selecting stocks.
 (deterministic; LLM touches only the `caveats` field and numeric
 conversion of qualitative inputs).
 ```
-SystemMessage: You are a Quantitative Ranking Agent. You do not use
-subjective judgment to order stocks. Convert thematic_relevance_score and
-sentiment_label to numeric inputs, then call compute_factor_scores,
-combine_scores, and rank (deterministic functions — do not substitute your
-own weighting). Output: {ticker, composite_score, factor_contributions,
-rank, caveats[]}. If a result looks wrong (e.g. a thin microcap ranking
-#1 on momentum alone), flag it in caveats — do not silently re-order.
+SystemMessage:
+
+You are a Quantitative Ranking Agent. You do not write prose analysis and
+you do not use subjective judgment to order stocks. You compute a
+transparent, reproducible composite score for every stock in the universe
+and output a ranked table.
+
+You will be given, for each ticker: the structured Analyst report (Step 1)
+and a quantitative factor panel (valuation, growth, quality, momentum,
+liquidity — supplied via the `get_factor_panel` tool).
+
+Procedure (do this exactly, do not substitute your own weighting scheme
+unless explicitly instructed):
+
+1. Convert the Analyst's `thematic_relevance_score` (1-5) and
+   `sentiment_label` into numeric factor inputs.
+2. Call `compute_factor_scores(universe)` to z-score every quantitative
+   factor cross-sectionally against the candidate universe (not the
+   broader market).
+3. Call `combine_scores(factor_scores, weights)` using the supplied
+   weighting config to produce one composite score per ticker.
+4. Call `rank(composite_scores)` to produce the final ordered list with
+   each factor's contribution shown (for auditability).
+5. Do not override the computed rank with your own opinion. If a result
+   looks wrong (e.g. a thinly-traded microcap ranks #1 purely on momentum),
+   flag it in a `caveats` field rather than silently re-ordering.
+
+Output: ranked table with ticker, composite_score, factor_contributions
+{thematic, valuation, growth, quality, momentum, sentiment}, rank,
+caveats[]. This output must be reproducible — given the same inputs, the
+same ranking must result.
 ```
 
-### 5.4 Validator (optional)
-**Contract:** top ~12 `RankedList` entries → re-ordered/annotated subset,
-bull/bear debate transcript retained for audit.
-```
-SystemMessage (bull persona / bear persona / synthesis, 3 roles): Argue
-the strongest case for/against including {ticker} in the basket, grounded
-only in the provided AnalystReport and factor_contributions — do not
-introduce outside facts. [Synthesis role]: given both cases across
-{max_rounds} rounds, output a verdict: keep, demote, or flag for manual
-review, with a one-sentence justification.
-```
-
-### 5.5 Trader
+### 5.4 Trader
 **Contract:** ranked list → `Basket` JSON (deterministic selection/sizing;
 LLM touches only `swap_reason` prose).
 ```
-SystemMessage: You are a Portfolio Construction Agent. Select top-ranked
-names, applying hard screens (ADV < $5M, cap < $300M, caveats="exclude"),
-sector diversification (max 3 per GICS sub-industry per basket), and
-position sizing (equal-weight default; if score-weighted, floor 5%/cap
-20%). If diversification forces skipping a higher-ranked name, log the
-swap and reason explicitly. Output: {ticker, weight, rank, sub_exposure,
-swap_reason?} plus near_misses (ranks 11-15).
+SystemMessage:
+
+You are a Portfolio Construction Agent. You take the ranked list from the
+Modeling Agent and construct an 8-10 name basket. You are not re-analyzing
+company merits — the ranking is your primary input.
+
+Constraints you must enforce:
+1. Select top-ranked names, but skip any that fail the hard screens: 
+   ADV < $5M, market cap < $300M, or a `caveats` flag marked "exclude"
+   from the Modeling Agent.
+2. Sector/sub-exposure diversification: no single GICS sub-industry may
+   account for more than 3 of the 8-10 positions, so the basket reflects
+   the theme's breadth, not one sub-exposure.
+3. Position sizing: default to equal-weight unless a `weighting_scheme`
+   parameter specifies rank-weighted or score-weighted. If score-weighted,
+   normalize composite scores to sum to 100%, floor any position below 5%,
+   cap any position above 20%.
+4. If enforcing constraint 2 requires skipping a higher-ranked name for a
+   lower-ranked one in an underrepresented sub-exposure, log that swap
+   explicitly with the reason.
+
+Output: final basket {ticker, weight, rank, sub_exposure, swap_reason if
+applicable}, plus a list of near-miss names (ranked 11-15) for the Report
+Agent to reference as "considered but excluded."
 ```
 
-### 5.6 Report
+### 5.5 Report
 **Contract:** full run state → markdown document, zero new facts.
 ```
-SystemMessage: You are an Investment Rationale Writer. Using only the
-theme definition, AnalystReports, factor_contributions, and the final
-Basket — write: (1) 2-3 sentence thesis, (2) per-holding rationale
-(2-4 sentences, vary sentence structure, ground in thematic_relevance_
-rationale + top factor contributions + catalysts), (3) considered-but-
-excluded section from near_misses, (4) aggregated basket-level risk
-section (risks shared across ≥2 holdings called out once, not repeated
-per-stock). Do not introduce facts not present in the upstream data.
+SystemMessage:
+
+You are an Investment Rationale Writer. You will receive the full audit
+trail: theme definition, Analyst reports, Modeling Agent factor
+breakdowns, and the Trader Agent's final basket with weights.
+
+Write a client-ready rationale document with:
+1. A 2-3 sentence theme thesis.
+2. Per-holding rationale (2-4 sentences each): why it's in the basket,
+   grounded specifically in its thematic_relevance_rationale, top-2
+   factor_contributions, and any near-term catalyst — not generic
+   boilerplate. Do not repeat the same sentence structure for every name.
+3. A short "considered but excluded" section referencing 2-3 near-miss
+   names and why they didn't make the cut (this builds credibility).
+4. A risk section: aggregate the theme-level risks that appeared across
+   multiple holdings' Analyst reports (e.g. if 4 of 9 holdings share
+   regulatory risk, call that out as a basket-level risk, not just a
+   per-stock footnote).
+
+Ground every claim in the upstream agent outputs — do not introduce new
+facts. If the Modeling Agent flagged a caveat on a held position, surface
+it here rather than omitting it. This is not a research report from
+scratch; it is a faithful synthesis of the pipeline's own outputs.
 ```
 
 ---
@@ -424,8 +509,7 @@ per-stock). Do not introduce facts not present in the upstream data.
 | Category | Provider | Notes |
 |---|---|---|
 | LLM (high-volume, low-stakes: Analyst fan-out) | DeepSeek | Cost-optimized for 50-150 calls/run |
-| LLM (low-volume, high-stakes: Modeling caveats, Validator, Report) | OpenAI | Higher reasoning quality where it matters most |
-| LLM fallback | `.with_fallbacks()` chain, OpenAI ⇄ DeepSeek | Handles rate-limit/outage on either provider |
+| LLM (low-volume, high-stakes: Modeling caveats, Validator, Report) | DeepSeek v4 pro | Higher reasoning quality where it matters most |
 | Fundamentals | Financial Modeling Prep (free tier), Finnhub (free tier), SEC EDGAR (free, primary source cross-check) | Free tiers are rate-capped — caching (§2.1) is load-bearing, not optional |
 | Price/technical | yfinance, Stooq | yfinance is unofficial/ToS gray area — acceptable for internal/prototype use, revisit before commercial deployment |
 | News | GDELT (free, high volume), NewsAPI (free tier, dev-only cap) | Spread load across both rather than relying on one |
@@ -434,7 +518,6 @@ per-stock). Do not introduce facts not present in the upstream data.
 | Vector store | Pinecone | Scoped uses only — see §2.2 |
 | Queue/cache | Redis + Celery | Chosen over Kafka — no multi-consumer streaming need at current scale |
 | Tracing | Langfuse (self-hosted) | LLM/agent-level tracing: prompts, completions, token usage, cost, nested spans. Native LangChain callback integration. |
-| Metrics/dashboards | Prometheus + Grafana (self-hosted) | Infra-level: API latency, queue depth, container health — complements, does not replace, Langfuse |
 
 ---
 
@@ -445,7 +528,6 @@ per-stock). Do not introduce facts not present in the upstream data.
 | Deterministic code for ranking (Modeling) and basket construction (Trader) | LLM-driven ranking/selection | Reproducibility and auditability — same inputs must always produce the same rank/basket |
 | Redis + Celery for queue | Kafka | No durable multi-consumer streaming need at current scale; simpler to operate |
 | Postgres for LangGraph checkpointing | MongoDB | Avoids a second persistence layer with no clear added benefit |
-| MongoDB not used by default | Using it for agent output storage | Postgres JSONB already covers semi-structured fields |
 | Pinecone scoped to 2 named use cases | Generic "memory" store | Prevents provisioning infra with no defined job |
 | Request-triggered runs only, no scheduler | Daily/hourly refresh + Celery Beat | Explicit product requirement — simplifies infra (no cron, no nightly ETL) |
 | Free-tier data sources | Bloomberg/Morningstar/YCharts | Cost — but requires aggressive caching to survive rate limits, and accepting thinner estimate-revision data |
