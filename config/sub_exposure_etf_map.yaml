@@ -1,0 +1,124 @@
+# config/sub_exposure_etf_map.yaml
+#
+# Hand-curated sub-exposure -> ETF ticker mapping for search_holdings()
+# (SCREENER_SKILL.md, Step 2). No free API maps a sub-exposure keyword to
+# relevant ETFs automatically — this file is the one piece of Screener
+# configuration that has no data-source shortcut and must be maintained
+# by a human as new themes are added.
+#
+# Sourced from: the 11 GICS Select Sector SPDR ETFs (State Street), plus
+# major thematic ETF families (Global X, ARK, iShares, VanEck, First
+# Trust, SPDR thematic/industry funds) current as of late July 2026.
+# ETF holdings and even fund existence change over time — this file is a
+# SEED, not a permanently-accurate source; validate tickers are still
+# listed before relying on this in production, and expect to add/retire
+# entries as funds launch, merge, or close.
+#
+# An unmapped sub-exposure is a known gap (see Hard Rule 3 in
+# SCREENER_SKILL.md) — do not have an LLM guess a ticker to fill one in.
+
+# --- Broad GICS sectors (11 Select Sector SPDRs) ---
+information_technology: [XLK]
+financials: [XLF]
+energy: [XLE]
+health_care: [XLV]
+industrials: [XLI]
+materials: [XLB]
+utilities: [XLU]
+consumer_staples: [XLP]
+consumer_discretionary: [XLY]
+real_estate: [XLRE]
+communication_services: [XLC]
+
+# --- Semiconductors / chips ---
+semiconductors: [SMH, SOXX, SOXQ]
+semiconductor_equipment: [SMH, SOXX]
+ai_chips: [SMH, CHPX]
+
+# --- Artificial intelligence / software / cloud ---
+artificial_intelligence: [AIQ, BOTZ, ARKQ]
+ai_infrastructure: [AIQ, DTCR]
+enterprise_software: [IGV, WCLD]
+cloud_computing: [CLOU, SKYY, WCLD]
+saas: [WCLD, IGV]
+robotics: [BOTZ, ROBO, ARKQ]
+quantum_computing: [QTUM, CHPX]
+
+# --- Cybersecurity / fintech / payments ---
+cybersecurity: [CIBR, BUG, HACK]
+fintech: [FINX]
+digital_payments: [IPAY, FINX]
+blockchain: [BKCH, BLOK]
+
+# --- Clean energy / climate / grid ---
+clean_energy: [ICLN, PBW]
+solar: [TAN]
+grid_modernization: [GRID]
+transmission_equipment: [GRID, XLU]
+smart_grid: [GRID]
+battery_storage: [LIT]
+lithium: [LIT]
+electric_vehicles: [DRIV, LIT]
+autonomous_vehicles: [DRIV, ARKQ]
+uranium_nuclear: [URA, NLR]
+water_infrastructure: [PHO, CGW, FIW]
+timber_forestry: [WOOD]
+
+# --- Infrastructure / industrials / defense ---
+infrastructure: [PAVE]
+data_centers: [DTCR, SRVR]
+aerospace_defense: [ITA, XAR, PPA]
+defense_technology: [SHLD, ITA]
+transportation: [IYT, XTN]
+homebuilders: [XHB, ITB]
+housing_construction: [ITB, XHB]
+
+# --- Financials sub-segments ---
+regional_banks: [KRE]
+banking: [KBE, KRE]
+broker_dealers: [IAI]
+insurance: [KIE]
+
+# --- Healthcare sub-segments ---
+biotechnology: [XBI, IBB]
+genomics: [ARKG]
+medical_devices: [IHI]
+pharmaceuticals: [XPH]
+healthcare_providers: [IHF]
+
+# --- Materials / mining / commodities ---
+metals_mining: [XME]
+gold_miners: [GDX]
+silver_miners: [SIL]
+copper_miners: [COPX]
+rare_earth_strategic_metals: [REMX]
+agribusiness: [MOO]
+
+# --- Energy sub-segments ---
+oil_gas_exploration: [XOP]
+oil_gas_equipment_services: [OIH, XES]
+
+# --- Consumer / retail / internet ---
+retail: [XRT]
+e_commerce: [IBUY, ONLN]
+online_retail: [IBUY, ONLN]
+social_media: [SOCL]
+internet: [FDN, PNQI]
+video_games_esports: [HERO, ESPO]
+metaverse: [METV]
+
+# --- Communications / media / telecom ---
+telecom_5g: [FIVG]
+internet_of_things: [SNSR]
+
+# --- Transportation / travel ---
+airlines: [JETS]
+
+# --- Space ---
+space_exploration: [ARKX, UFO]
+
+# --- China / international tech (only if a theme explicitly needs non-US exposure) ---
+china_internet: [KWEB]
+
+# --- Broad thematic/innovation (use sparingly — very broad, dilutes sub-exposure specificity) ---
+disruptive_innovation: [ARKK]
