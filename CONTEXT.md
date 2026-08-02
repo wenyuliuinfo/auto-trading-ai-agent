@@ -7,13 +7,6 @@ conversation — if a coding agent finds itself using a synonym not listed
 here for a defined concept, it should use the term below instead, or add
 a new entry rather than introduce ambiguity.
 
-**One correction to the system's own framing worth stating explicitly:**
-this is a **basket research and construction system**, not an
-auto-trading agent. It never places, modifies, or executes live orders —
-its output is a proposed basket and a rationale document for a human to
-review (see ARCHITECTURE.md §0, Non-goals, and §9, Compliance). Avoid
-"auto-trading" language anywhere in code, prompts, or UI copy, since it
-misrepresents what the system does and creates a compliance risk.
 
 ---
 
