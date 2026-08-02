@@ -19,7 +19,7 @@ Before making changes, read documents in this order:
 ## 1. Repository Map
 
 ```
-src/frontend/                 # Next.js 16 (App Router) — theme creation, run, trigger, live run progress, basket + report display
+src/web/                      # Next.js 16 (App Router) — theme creation, run, trigger, live run progress, basket + report display
 src/app/                      # FastAPI + Celery backend
 ├── api/                      # FastAPI routes — HTTP only, no business logic
 ├── agents/                   # One file per pipeline agent:
@@ -68,11 +68,11 @@ not roles themselves.)*
 
 ### pipeline-engineer
 - **Role**: Implements and maintains the six pipeline agents in
-  `app/agents/` and their `integrations/` dependencies.
-- **Scope**: `app/agents/`, `app/integrations/`
+  `src/app/agents/` and their `integrations/` dependencies.
+- **Scope**: `src/app/agents/`, `src/app/integrations/`
 - **Constraints**:
   - Working on `screener.py`/`reference_universe.py`/`etf_holdings.py` →
-    load `skills/screener-agent-implementation/SKILL.md` first.
+    load `skills/SCREENER_SKILL.md` first.
   - Working on `analyst.py`/`news.py`/`sec_edgar.py`/`social_sentiment.py`
     → load `skills/ANALYST_SKILL.md` first.
   - Working on `modeling.py`/`fundamentals.py`/`prices.py`/
@@ -89,7 +89,7 @@ not roles themselves.)*
 
 ### api-engineer
 - **Role**: Builds FastAPI routes and the Celery task-enqueue boundary.
-- **Scope**: `app/api/`, `app/worker.py`
+- **Scope**: `src/app/api/`, `src/app/worker.py`
 - **Constraints**:
   - OpenAPI-documented, Pydantic-v2-validated, async endpoints.
   - `POST /themes/{id}/runs` must enqueue and return immediately — never
@@ -105,7 +105,7 @@ not roles themselves.)*
 ### frontend-engineer
 - **Role**: Builds the Next.js UI — theme creation, run triggering, live
   progress, basket/report display.
-- **Scope**: `frontend/`
+- **Scope**: `src/web/`
 - **Constraints**:
   - Next.js 16 App Router, React Server Components by default, client
     components only for interactivity (run-progress polling/SSE).
@@ -137,9 +137,9 @@ not roles themselves.)*
 |---|---|
 | `ARCHITECTURE.md` §4–§7 (pipeline design, agent contracts, decisions) | `design-architect` → `pipeline-engineer` → `api-engineer` |
 | A `SKILL.md`'s "Reference implementation" (scoring formulas, factor sources) | `pipeline-engineer` (self) — and the corresponding `ARCHITECTURE.md` §4/§7 section must be updated in the same PR so the two never drift apart |
-| `app/api/` routes or response schemas | `api-engineer` (self), `frontend-engineer` (contract check) |
-| `app/data/models.py` (DB schema) | `pipeline-engineer` (self), `api-engineer` (contract check) |
-| `frontend/components/basket/*` or `frontend/components/report/*` | `frontend-engineer` (self), `api-engineer` (contract check) |
+| `src/app/api/` routes or response schemas | `api-engineer` (self), `frontend-engineer` (contract check) |
+| `src/app/data/models.py` (DB schema) | `pipeline-engineer` (self), `api-engineer` (contract check) |
+| `src/web/components/basket/*` or `src/web/components/report/*` | `frontend-engineer` (self), `api-engineer` (contract check) |
 | `infra/docker-compose.yml` | `infra-engineer` (self) — must update `ARCHITECTURE.md` §10 failure-mode table if a new service is added |
 | A theme's factor `weights` config | `pipeline-engineer` — run the shadow-mode comparison from `ARCHITECTURE.md` §8 before promoting new weights |
 
@@ -170,6 +170,7 @@ Before implementing:
 
 ### Simplicity First
 Minimum code that solves the problem. Nothing speculative.
+- No hardcoding environment variables in all files.
 - No features beyond what was asked.
 - No abstractions for single-use code.
 - No "flexibility" or "configurability" that wasn't requested.
@@ -196,7 +197,7 @@ docker compose -f infra/docker-compose.yml up fastapi celery-worker   # backend 
 docker compose -f infra/docker-compose.yml --profile tracing up -d    # + Tempo
 
 # Run — local dev, outside compose
-uvicorn app.api.main:app --reload
+uvicorn main:app --reload --port 8000
 celery -A app.worker worker --loglevel=info
 pnpm --dir frontend dev
 
@@ -220,7 +221,7 @@ pnpm check:structure        # layer boundary tests (api/ → agents/ → integra
 ### 5.1 Plan
 Agent analyzes the task, references `ARCHITECTURE.md` and `CONVENTIONS.md`.
 - Touches Screener/candidate generation → `pipeline-engineer` leads, load
-  `skills/screener-agent-implementation/SKILL.md`
+  `skills/SCREENER_SKILL.md`
 - Touches Analyst/per-ticker research → `pipeline-engineer` leads, load
   `skills/ANALYST_SKILL.md`
 - Touches Modeling/scoring/ranking → `pipeline-engineer` leads, load
