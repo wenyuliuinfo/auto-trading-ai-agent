@@ -23,12 +23,13 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-app}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mypassword}
       POSTGRES_DB: ${POSTGRES_DB:-thematic_basket}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-thematic_basket}"]
       interval: 5s
@@ -38,7 +39,7 @@ services:
 
   pinecone-local:
     image: ghcr.io/pinecone-io/pinecone-local:latest
-    container_name: pinecone-local
+    container_name: pinecone-auto
     platform: linux/amd64
     environment:
       PORT: 5080
@@ -146,7 +147,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: langfuse
-      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:?set LANGFUSE_DB_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-mypassword}
       POSTGRES_DB: langfuse
     volumes:
       - langfuse_db_data:/var/lib/postgresql/data
@@ -164,8 +165,8 @@ services:
     environment:
       DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD}@langfuse-db:5432/langfuse
       NEXTAUTH_URL: http://localhost:3001
-      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?set LANGFUSE_NEXTAUTH_SECRET in .env}
-      SALT: ${LANGFUSE_SALT:?set LANGFUSE_SALT in .env}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-mysecret}
+      SALT: ${LANGFUSE_SALT:-mysaltkey}
     ports:
       - "3001:3000"
     depends_on:
