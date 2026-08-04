@@ -43,11 +43,29 @@ ranking — that math stays in `agents/modeling.py` per Hard Rule 1.
    The Modeling agent's LLM call is only for converting `thematic_relevance_score`/
    `sentiment_label` to numeric inputs and writing the `caveats` field —
    nothing here.
-2. **Factor weights are always a config parameter, never hardcoded inline**
-   in a call site. `DEFAULT_WEIGHTS` below is a fallback default, not the
-   only allowed set — every call to `combine_scores` must accept a
-   `weights` dict, sourced from the theme's config (`ARCHITECTURE.md` §2.1,
-   `themes.config`).
+2. **Factor weights are never user input, in any form, and never a Python
+   constant `modeling.py` reads directly.** The single source of truth is
+   `config/factor_weights.yaml` — a hand-maintained, ops/quant-owned file,
+   the same pattern as `config/sub_exposure_etf_map.yaml`. It is loaded
+   **exactly once in the entire codebase**, by the `POST /themes` handler
+   (`api-engineer`'s scope) at theme-creation time, and copied verbatim
+   into `theme.config.factor_weights`. There is no API field, no UI
+   control, and no code path anywhere that lets a caller supply or
+   override weights — `config/theme_create_request.schema.json` (the
+   actual `POST /themes` request schema) has no `factor_weights` field at
+   all, and rejects the request with a 422 if one is submitted, rather
+   than silently ignoring it.
+   **`modeling_node` never reads the YAML file and never references any
+   weights constant** — it reads only the already-persisted
+   `theme_config["factor_weights"]` and **raises** if that key is
+   missing, rather than falling back to anything. This is what makes
+   weights real, persisted, per-theme data (`ARCHITECTURE.md` §2.1) —
+   editable by changing the YAML file for *future* themes, diffable via
+   `scripts/shadow_compare.py`, and fully decoupled from both user input
+   and a code redeploy. See `config/theme_config.schema.json` for the
+   stored shape and `config/theme_create_request.schema.json` for
+   confirmation of what's actually user-settable (`screens`,
+   `weighting_scheme`, `validator_enabled` — deliberately not weights).
 3. **Sign-flip "lower is better" factors (e.g. P/E) before calling
    `compute_factor_scores`** — never inside it. Keep the sign convention
    ("higher z-score is always better," after flipping) enforced at the
@@ -79,9 +97,11 @@ ranking — that math stays in `agents/modeling.py` per Hard Rule 1.
    only converts them to numeric form (see Step A, "LLM-derived factors").
 9. **Liquidity/risk factors (`adv`, `market_cap`, `beta`, `hist_vol`) are
    screening inputs for the Trader agent, not scored composite inputs by
-   default.** Do not add them to `DEFAULT_WEIGHTS` unless a theme config
-   explicitly opts in — conflating "used to exclude" with "used to rank"
-   silently changes what the composite score means.
+   default.** Do not add them to `config/factor_weights.yaml` unless
+   that's a deliberate, reviewed global policy change — conflating "used
+   to exclude" with "used to rank" silently changes what the composite
+   score means for every theme created after the change. There is no
+   per-theme opt-in for this; the weights file is global (Hard Rule 2).
 10. **Cache factor panel rows in the `factor_panel` table before
     recomputing.** Same-day requests for a ticker already fetched should
     reuse the stored row rather than re-hitting FMP/Finnhub/yfinance —
@@ -234,13 +254,14 @@ def compute_beta(close: pd.Series, benchmark: str, lookback_days: int) -> float:
 - `pe_ratio`, `ev_ebitda`, and `debt_to_ebitda` are the `LOWER_IS_BETTER`
   factors — sign-flip is applied by `agents/modeling.py` before calling
   `compute_factor_scores`, not here.
-- `ps_ratio` is available but not in `DEFAULT_WEIGHTS`'s valuation
-  factor by default — if a theme's config uses it instead of/alongside
-  `pe_ratio`/`ev_ebitda`, sign-flip it the same way (lower P/S is better).
+- `ps_ratio` is available but not included in `config/factor_weights.yaml`'s
+  valuation weighting by default — if that global policy is changed to
+  use it instead of/alongside `pe_ratio`/`ev_ebitda`, sign-flip it the
+  same way (lower P/S is better).
 - `adv`, `market_cap`, `beta`, `hist_vol` are computed here but consumed
   by the **Trader** agent's hard screens, not `combine_scores`, per Hard
-  Rule 9 — don't wire them into `DEFAULT_WEIGHTS` without an explicit
-  config decision.
+  Rule 9 — don't wire them into `config/factor_weights.yaml` without a
+  deliberate, reviewed global policy decision.
 - Estimate-revision trend (mentioned in the original factor table) is
   intentionally omitted from this reference implementation — free-tier
   FMP/Finnhub coverage of consensus estimate revisions is thin/
@@ -276,20 +297,21 @@ def compute_factor_scores(df: pd.DataFrame, factor_cols: list[str]) -> pd.DataFr
 
 ### Step C — Combine (weighted sum; default method — see §7 for Borda alternative)
 
-```python
-DEFAULT_WEIGHTS = {
-    "thematic_z": 0.30,
-    "growth_z": 0.20,
-    "quality_z": 0.15,
-    "valuation_z": 0.15,
-    "momentum_z": 0.10,
-    "sentiment_z": 0.10,
-}
-# Must sum to 1.0 — validate at theme config load time (see CONVENTIONS.md §3.2),
-# not inside this function.
+**No weights constant lives in `agents/modeling.py` at all.** The global
+default weights exist in exactly one place — `config/factor_weights.yaml`
+— and are loaded by a small function outside this skill's scope entirely
+(`app/api/themes.py`'s `POST /themes` handler, or a shared
+`app/config.py` loader it calls), which copies the YAML content verbatim
+into `theme.config.factor_weights` at theme-creation time. If you find
+yourself adding a weights dict literal anywhere in `agents/modeling.py`,
+stop — that's Hard Rule 2 being violated.
 
+```python
 def combine_scores(df: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
-    """Weighted linear combination of z-scored factors into one composite_score."""
+    """Weighted linear combination of z-scored factors into one composite_score.
+    `weights` must be theme_config["factor_weights"] — the caller (modeling_node)
+    is responsible for reading it from state and raising if it's absent
+    (Hard Rule 2). This function has no default weights of its own."""
     return sum(df[k] * w for k, w in weights.items())
 ```
 
@@ -332,9 +354,10 @@ For Steps B/C/D, cover at minimum:
 - Single-candidate universe (z-score is undefined for N=1 — decide and
   document the expected output rather than letting it silently NaN
   through to `rank`).
-- Weights that don't sum to 1.0 — should be caught at config load, not
-  here, but add a test confirming this function doesn't itself silently
-  renormalize an invalid weight dict.
+- Weights that don't sum to 1.0 — should be caught by `api-engineer`'s
+  validator against `config/factor_weights.yaml` at theme-creation time,
+  never here, but add a test confirming `combine_scores` doesn't itself
+  silently renormalize an invalid weight dict if one somehow reaches it.
 
 ## Where the Borda alternative and learning-to-rank fit in
 
@@ -343,3 +366,32 @@ If `combine_scores` is ever swapped for the Borda rank-aggregation method
 or a learned ranker (`LGBMRanker`), update `ARCHITECTURE.md`'s decision
 log in the same PR — this skill file's "reference implementation" section
 should also be updated to match, so the two never drift apart.
+
+## Shadow-mode comparison reuses these exact functions (`ARCHITECTURE.md` §8.C)
+
+`scripts/shadow_compare.py` is not a separate scoring implementation — it
+calls `compute_factor_scores` → `combine_scores(df, new_weights)` →
+`rank` directly, against a completed run's already-persisted
+`analyst_reports`/`factor_panel` rows loaded from Postgres instead of
+freshly fetched ones. No LLM calls, no vendor API calls — this is only
+cheap and safe *because* Steps B/C/D are pure, deterministic functions
+with no hidden state (Hard Rule 4). If you ever introduce hidden state
+or non-determinism into this file, shadow-mode comparison silently stops
+being trustworthy — treat that coupling as another reason Hard Rule 4
+isn't optional.
+
+```python
+# scripts/shadow_compare.py (sketch — lives outside app/, not itself
+# part of the agent pipeline)
+from app.agents.modeling import compute_factor_scores, combine_scores, rank
+from app.data.queries import get_analyst_reports, get_factor_panel_rows
+
+def shadow_compare(run_id: str, new_weights: dict[str, float]) -> "DiffReport":
+    reports = get_analyst_reports(run_id)          # already-persisted, no re-fetch
+    panel = get_factor_panel_rows(run_id)           # already-persisted, no re-fetch
+    scored = compute_factor_scores(panel, factor_cols=list(new_weights))
+    combined = combine_scores(scored, new_weights)
+    new_ranked = rank(combined)
+    old_ranked = get_persisted_rankings(run_id)      # what actually shipped
+    return diff_rankings(old_ranked, new_ranked)     # tickers in/out, rank deltas
+```
