@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://internal/schemas/theme_create_request.schema.json",
+  "title": "ThemeCreateRequest",
+  "description": "The ONLY schema a client-supplied POST /themes body is validated against. Deliberately has no factor_weights field - this is not an oversight. factor_weights is never user input; it is loaded server-side from config/factor_weights.yaml by the handler and is not settable through this or any other endpoint. additionalProperties is false specifically so that a client mistakenly submitting factor_weights gets a hard 422, not a silently-ignored field - silent ignoring would let someone believe they customized weighting policy when they didn't.",
+  "type": "object",
+  "required": ["name", "definition", "sub_exposures"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "definition": { "type": "string", "minLength": 1 },
+    "sub_exposures": {
+      "type": "array",
+      "description": "3-6 sub-exposure keys. Each MUST match a key in config/sub_exposure_etf_map.yaml (SCREENER_SKILL.md) - validated at creation time, not deferred to Screener run time.",
+      "minItems": 3,
+      "maxItems": 6,
+      "items": { "type": "string" }
+    },
+    "screens": {
+      "type": "object",
+      "description": "Optional overrides of the default liquidity/diversification screens. Unlike factor_weights, these ARE legitimate per-theme user input - a theme targeting micro-cap names may reasonably want a lower min_market_cap, for example. This is a deliberate distinction: screens are risk/eligibility parameters the requester should control; factor_weights is scoring methodology, which is not a per-request customization.",
+      "additionalProperties": false,
+      "properties": {
+        "min_avg_dollar_volume": { "type": "number" },
+        "min_market_cap": { "type": "number" },
+        "max_per_sub_industry": { "type": "integer" }
+      }
+    },
+    "weighting_scheme": {
+      "type": "string",
+      "enum": ["equal_weight", "score_weighted"],
+      "default": "equal_weight",
+      "description": "Basket position-sizing method (ARCHITECTURE.md section 5.4) - NOT to be confused with factor_weights. This controls how the 8-10 final positions are sized against each other; factor_weights controls how candidates are scored/ranked in the first place. Legitimate user input for the same reason screens are."
+    },
+    "validator_enabled": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

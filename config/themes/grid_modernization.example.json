@@ -1,0 +1,24 @@
+{
+  "sub_exposures": [
+    "transmission_equipment",
+    "smart_grid",
+    "battery_storage",
+    "utilities",
+    "infrastructure"
+  ],
+  "factor_weights": {
+    "thematic_z": 0.30,
+    "growth_z": 0.20,
+    "quality_z": 0.15,
+    "valuation_z": 0.15,
+    "momentum_z": 0.10,
+    "sentiment_z": 0.10
+  },
+  "screens": {
+    "min_avg_dollar_volume": 5000000,
+    "min_market_cap": 300000000,
+    "max_per_sub_industry": 3
+  },
+  "weighting_scheme": "equal_weight",
+  "validator_enabled": true
+}

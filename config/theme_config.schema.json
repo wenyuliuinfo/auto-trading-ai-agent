@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://internal/schemas/theme_config.schema.json",
+  "title": "ThemeConfig",
+  "description": "Shape of the STORED themes.config JSONB column (ARCHITECTURE.md §2.1) — this is NOT the client-facing request schema. See config/theme_create_request.schema.json for what a POST /themes caller may actually submit; notably, that schema has no factor_weights field at all. factor_weights below is populated exclusively by the server from config/factor_weights.yaml at theme-creation time and is never accepted, read, or overridden from user/API input under any circumstance.",
+  "type": "object",
+  "required": ["sub_exposures", "factor_weights", "screens"],
+  "additionalProperties": false,
+  "properties": {
+    "sub_exposures": {
+      "type": "array",
+      "description": "3-6 sub-exposure keys the Screener decomposes the theme into. Each MUST match a key in config/sub_exposure_etf_map.yaml for search_holdings() to resolve it (SCREENER_SKILL.md) — an unmapped sub-exposure is a known gap, not silently guessed.",
+      "minItems": 3,
+      "maxItems": 6,
+      "items": { "type": "string" },
+      "examples": [["transmission_equipment", "smart_grid", "battery_storage", "utilities"]]
+    },
+    "factor_weights": {
+      "type": "object",
+      "description": "SYSTEM-POPULATED ONLY. Copied verbatim from config/factor_weights.yaml by the POST /themes handler at theme-creation time — never present in, or accepted from, the client request body (see theme_create_request.schema.json). modeling_node reads this field directly and must never fall back to a code-level default (MODELING_SKILL.md Hard Rule 2). Keys must match the *_z factor names produced by compute_factor_scores.",
+      "required": ["thematic_z", "growth_z", "quality_z", "valuation_z", "momentum_z", "sentiment_z"],
+      "additionalProperties": false,
+      "properties": {
+        "thematic_z":  { "type": "number", "minimum": 0, "maximum": 1 },
+        "growth_z":    { "type": "number", "minimum": 0, "maximum": 1 },
+        "quality_z":   { "type": "number", "minimum": 0, "maximum": 1 },
+        "valuation_z": { "type": "number", "minimum": 0, "maximum": 1 },
+        "momentum_z":  { "type": "number", "minimum": 0, "maximum": 1 },
+        "sentiment_z": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "screens": {
+      "type": "object",
+      "description": "Hard liquidity/size screens applied by the Trader agent (ARCHITECTURE.md §5.4). Defaults match the Trader's system prompt; override per theme only with a stated reason.",
+      "additionalProperties": false,
+      "properties": {
+        "min_avg_dollar_volume": {
+          "type": "number",
+          "default": 5000000,
+          "description": "USD. Candidates below this are flagged (not excluded) by the Screener; excluded by the Trader unless overridden."
+        },
+        "min_market_cap": {
+          "type": "number",
+          "default": 300000000,
+          "description": "USD."
+        },
+        "max_per_sub_industry": {
+          "type": "integer",
+          "default": 3,
+          "description": "Diversification cap — max basket positions from one GICS sub-industry."
+        }
+      }
+    },
+    "weighting_scheme": {
+      "type": "string",
+      "enum": ["equal_weight", "score_weighted"],
+      "default": "equal_weight",
+      "description": "ARCHITECTURE.md §5.4. If score_weighted, Trader normalizes composite scores to 100%, floors positions at 5%, caps at 20%."
+    },
+    "validator_enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether the optional bull/bear Validator step (top ~12 names) runs for this theme — see ARCHITECTURE.md §11 open question on whether it's worth the added cost/latency."
+    }
+  }
+}
