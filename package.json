@@ -1,17 +1,16 @@
 {
-  "name": "vibe-coding-starter-kit",
+  "name": "auto-trading-ai-agent",
   "private": true,
   "scripts": {
     "dev": "concurrently --names web,api --prefix-colors blue,green \"pnpm dev:web\" \"pnpm dev:api\"",
-    "dev:web": "pnpm --filter @vibe-coding-starter-kit/web dev",
-    "dev:api": "cd src/app && uvicorn main:app --reload --port 8000",
-    "build": "pnpm --filter @vibe-coding-starter-kit/web build",
-    "lint": "pnpm --filter @vibe-coding-starter-kit/web lint",
+    "dev:web": "pnpm --dir src/web dev",
+    "dev:api": "cd src/app && .venv/bin/uvicorn main:app --reload --port 8000",
+    "build": "pnpm --dir src/web build",
+    "lint": "pnpm --dir src/web lint",
     "lint:api": "cd src/app && .venv/bin/ruff check .",
     "test:api": "cd src/app && .venv/bin/python -m pytest",
     "test:eval": "cd src/app && .venv/bin/python -m pytest tests/test_eval.py -v",
     "check:structure": "cd src/app && .venv/bin/python -m pytest tests/test_structure.py -v",
-    "ingest": "cd src/app && .venv/bin/python -m ingestion.cli",
     "typecheck:api": "cd src/app && .venv/bin/mypy --strict ."
   },
   "devDependencies": {
