@@ -1,0 +1,35 @@
+# config/factor_weights.yaml
+#
+# The SOLE source of truth for factor weighting policy. NEVER accepted
+# as user/API input — there is no request field, no UI control, and no
+# endpoint that lets a caller set or override this. Changing weighting
+# policy means editing this file and shipping a change, the same as any
+# other config-as-code change (config/sub_exposure_etf_map.yaml follows
+# the same pattern) — it is explicitly an ops/quant-owned artifact, not
+# a per-theme or per-user customization surface.
+#
+# Loaded exactly once per theme, at theme-creation time, by the
+# POST /themes handler (api-engineer's scope) — copied verbatim into
+# theme.config.factor_weights as a persisted snapshot (ARCHITECTURE.md
+# §2.1), so a theme's evaluation policy stays reproducible even if this
+# file is later edited for newly-created themes. modeling_node never
+# reads this file directly and never reads any file at run time — it
+# only reads the already-persisted theme_config["factor_weights"]
+# (MODELING_SKILL.md Hard Rule 2).
+#
+# Must sum to 1.0 — validated by api-engineer at theme-creation time
+# against this file, and again structurally via
+# config/theme_config.schema.json.
+
+thematic_z: 0.30
+growth_z: 0.20
+quality_z: 0.15
+valuation_z: 0.15
+momentum_z: 0.10
+sentiment_z: 0.10
+
+# To propose a change: edit this file, run scripts/shadow_compare.py
+# against a sample of recent runs to see the impact (ARCHITECTURE.md
+# §8.C), get it reviewed, then merge — newly-created themes after that
+# point pick up the new policy automatically; existing themes keep their
+# original snapshot unless explicitly recreated.
