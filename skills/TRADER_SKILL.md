@@ -192,6 +192,7 @@ def _apply_position_sizing(basket: list[dict], weighting_scheme: str) -> None:
 
 ```python
 from app.data.queries import save_basket
+from app.integrations.deepseek_client import deepseek_client
 
 TRADER_MODEL = "deepseek-v4-pro"   # low-volume, high-stakes tier — ARCHITECTURE.md §6
 TRADER_TEMPERATURE = 0.2            # only used for swap_reason prose generation

@@ -161,6 +161,7 @@ def apply_disclaimer(report_md: str) -> str:
 
 ```python
 from app.data.queries import save_report
+from app.integrations.deepseek_client import deepseek_client
 
 REPORT_MODEL = "deepseek-v4-pro"
 REPORT_TEMPERATURE = 0.5
