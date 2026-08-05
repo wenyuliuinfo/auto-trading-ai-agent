@@ -1,5 +1,5 @@
 # ARCHITECTURE.md
-## Thematic Stock/ETF Basket Multi-Agent System
+## Auto Trading Stock/ETF Basket Multi-Agent System
 
 This document is the single source of truth for implementation decisions.
 If a coding agent (human or AI) is unsure how something should be built,
@@ -76,8 +76,36 @@ CREATE TABLE themes (
     name            TEXT NOT NULL,
     definition      TEXT NOT NULL,
     config          JSONB NOT NULL,        -- sub-exposures, factor weights, screens
+                                            -- (config.factor_weights is REQUIRED and
+                                            -- SYSTEM-POPULATED ONLY — see the rule
+                                            -- immediately below)
     created_at      TIMESTAMPTZ DEFAULT now()
 );
+```
+
+**`config.factor_weights` sourcing rule — never user input, in any form:**
+factor weighting policy lives in exactly one place in the whole system:
+`config/factor_weights.yaml`, a hand-maintained, ops/quant-owned file
+(same pattern as `config/sub_exposure_etf_map.yaml`). It is loaded
+**exactly once**, by the `POST /themes` handler, and copied verbatim into
+`config.factor_weights` at theme-creation time. There is **no API field,
+no UI control, and no code path that lets a caller supply or override
+it** — the actual client-facing request schema,
+`config/theme_create_request.schema.json`, has no `factor_weights`
+property at all, and a request that includes one is rejected with a 422
+rather than silently ignored (silently ignoring it would let a caller
+believe they'd customized weighting policy when they hadn't).
+`modeling_node` must **only** read `theme_config["factor_weights"]` from
+already-persisted state and must raise, never fall back to any default,
+if it's missing. This is what makes weights real persisted data —
+diffable and safe to shadow-test (§8.C) — while keeping the weighting
+*methodology* entirely out of user reach, unlike `screens` and
+`weighting_scheme`, which remain legitimate per-theme request input (see
+`config/theme_create_request.schema.json` for that distinction spelled
+out). See `config/theme_config.schema.json` for the full stored shape.
+
+
+```sql
 
 CREATE TABLE runs (
     run_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -147,6 +175,12 @@ CREATE TABLE baskets (
     rank            INT,
     sub_exposure    TEXT,
     swap_reason     TEXT
+    -- Deliberately NO composite_score column — it already lives in
+    -- `rankings`, keyed by (run_id, ticker). See TRADER_SKILL.md Hard
+    -- Rule 5 and get_basket_with_scores() in §3 below: the API layer and
+    -- Report agent both join baskets + rankings at read time rather than
+    -- storing the value twice, where it could drift out of sync with
+    -- what Modeling actually computed.
 );
 
 CREATE TABLE reports (
@@ -195,7 +229,7 @@ not assumed to be doing anything.
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/themes` | POST | Create a theme (name, definition, config: sub-exposures, factor weights) |
+| `/themes` | POST | Create a theme (`name`, `definition`, `sub_exposures`, optionally `screens`/`weighting_scheme`/`validator_enabled` — see `config/theme_create_request.schema.json`). **`factor_weights` is never accepted here or anywhere** — it's loaded server-side from `config/factor_weights.yaml`; a request that includes it gets a 422. |
 | `/themes/{theme_id}` | GET | Fetch a theme's definition/config |
 | `/themes/{theme_id}/runs` | POST | Trigger a pipeline run for this theme. Enqueues to Celery, returns `{run_id, status: "queued"}` immediately — never runs the graph synchronously in the request handler. |
 | `/runs/{run_id}` | GET | Run status/progress (`queued \| running \| complete \| failed`, plus `progress: {analyzed: 42, total: 120}` while running) |
@@ -212,10 +246,16 @@ to the requesting user/org, not globally open.
 it must be present on every ticker returned by `/runs/{run_id}/basket`
 and `/runs/{run_id}/rankings`, since the UI displays it directly next to
 each holding (not just in an expandable "details" view) and the Report
-agent's contract (§5.6) depends on it being available in Run state at
-generation time. Any refactor of the `rankings`/`baskets` schema (§2.1)
-must preserve this field's presence — treat dropping or renaming it as a
-breaking API change requiring a version bump, not a routine cleanup.
+agent's contract (§5.5) depends on it being available in Run state at
+generation time. **Implementation:** since `baskets` has no
+`composite_score` column by design (§2.1), both this endpoint and the
+Report agent's context assembly get it via the same shared join function,
+`get_basket_with_scores()` (`TRADER_SKILL.md`) — do not reimplement the
+`baskets`/`rankings` join in the API handler separately from the one
+`REPORT_SKILL.md` uses. Any refactor of the `rankings`/`baskets` schema
+(§2.1) must preserve this field's presence — treat dropping or renaming
+it as a breaking API change requiring a version bump, not a routine
+cleanup.
 
 
 ---
@@ -224,14 +264,14 @@ breaking API change requiring a version bump, not a routine cleanup.
 
 ### 4.1 Agents and their responsibility boundary
 
-| Agent | Job | LLM-driven? |
-|---|---|---|
-| Screener | Theme → bounded candidate list (50-150 tickers) | Yes — theme decomposition is language reasoning |
-| Analyst (fan-out) | Per-ticker qualitative research → structured report | Yes — one call per candidate, parallelized |
-| Modeling | Factor scoring + cross-sectional ranking | **No** for the ranking math — deterministic code. LLM only converts qualitative signals to numeric inputs and writes `caveats` text. |
-| Validator (optional) | Bull/bear check on top ~12 ranked names | Yes — adversarial debate, bounded to top candidates only |
-| Trader | Basket construction under constraints | **No** for selection/sizing — deterministic code. LLM only writes `swap_reason` prose. |
-| Report | Synthesize everything into a rationale document | Yes — prose generation, strictly fact-bound to upstream outputs |
+| Agent | Job | LLM-driven? | Implementation skill |
+|---|---|---|---|
+| Screener | Theme → bounded candidate list (50-150 tickers) | Yes — theme decomposition is language reasoning | `SCREENER_SKILL.md` |
+| Analyst (fan-out) | Per-ticker qualitative research → structured report | Yes — one call per candidate, parallelized | `ANALYST_SKILL.md` |
+| Modeling | Factor scoring + cross-sectional ranking | **No** for the ranking math — deterministic code. LLM only converts qualitative signals to numeric inputs and writes `caveats` text. | `MODELING_SKILL.md` |
+| Validator (optional) | Bull/bear check on top ~12 ranked names | Yes — adversarial debate, bounded to top candidates only | *(none yet — flagged gap, §11)* |
+| Trader | Basket construction under constraints | **No** for selection/sizing — deterministic code. LLM only writes `swap_reason` prose. | `TRADER_SKILL.md` |
+| Report | Synthesize everything into a rationale document | Yes — prose generation, strictly fact-bound to upstream outputs | `REPORT_SKILL.md` |
 
 This split is intentional and load-bearing: ranking and portfolio
 construction must be reproducible given the same inputs, so they are never
@@ -275,18 +315,41 @@ def analyst_node(state: dict) -> dict:
 def modeling_node(state: BasketState) -> dict:
     factor_panel = fetch_factor_panel([r["ticker"] for r in state["analyst_reports"]])
     scored = compute_factor_scores(state["analyst_reports"], factor_panel)
-    combined = combine_scores(scored, state["theme_config"]["weights"])
+    weights = state["theme_config"]["factor_weights"]  # REQUIRED, system-populated
+                                                          # at theme creation from
+                                                          # config/factor_weights.yaml —
+                                                          # never user input; see §2.1
+    combined = combine_scores(scored, weights)
     return {"ranked_list": rank(combined), "factor_panel": factor_panel}
 
 def validator_node(state: BasketState) -> dict:
     return {"ranked_list": run_bull_bear_check(state["ranked_list"][:12])}
 
 def trader_node(state: BasketState) -> dict:
-    basket, near_misses = construct_basket(state["ranked_list"], state["theme_config"])
+    # construct_basket is pure/deterministic (TRADER_SKILL.md Hard Rule 1);
+    # swap_events is structured data, turned into swap_reason prose by a
+    # narrow LLM call inside trader_node — see TRADER_SKILL.md for the
+    # full implementation, this is the state-shape summary only.
+    basket, near_misses, swap_events = construct_basket(
+        state["ranked_list"], state["theme_config"]
+    )
+    if swap_events:
+        basket = attach_swap_reasons(basket, swap_events)  # TRADER_SKILL.md
+    save_basket(state["run_id"], basket)  # ticker/weight/rank/sub_exposure/
+                                            # swap_reason only — composite_score
+                                            # is NOT duplicated here (§2.1)
     return {"basket": basket, "near_misses": near_misses}
 
 def report_node(state: BasketState) -> dict:
-    return {"report_md": run_report_agent(state)}
+    # assemble_report_context joins basket+rankings (via get_basket_with_scores,
+    # defined once in data/queries.py, shared with the /runs/{run_id}/basket
+    # API handler — §3) and pre-clusters shared risks before the single LLM
+    # call. apply_disclaimer wraps the result unconditionally. Full
+    # implementation in REPORT_SKILL.md.
+    context = assemble_report_context(state["run_id"], state["theme"], state["near_misses"])
+    report_md = apply_disclaimer(run_report_agent(context))
+    save_report(state["run_id"], report_md)
+    return {"report_md": report_md}
 
 def check_basket_complete(state: BasketState) -> str:
     if len(state["basket"]) >= 8 or state.get("retry_count", 0) >= 2:
@@ -443,7 +506,12 @@ same ranking must result.
 
 ### 5.4 Trader
 **Contract:** ranked list → `Basket` JSON (deterministic selection/sizing;
-LLM touches only `swap_reason` prose).
+LLM touches only `swap_reason` prose). **Canonical implementation:**
+`TRADER_SKILL.md` — `construct_basket()` performs constraints 1-4 below
+as plain code; the LLM is invoked once, only if a diversification skip
+occurred, over the structured `swap_events` the code already produced —
+it never decides which ticker was skipped or why, only phrases the
+explanation.
 ```
 SystemMessage:
 
@@ -458,10 +526,12 @@ Constraints you must enforce:
 2. Sector/sub-exposure diversification: no single GICS sub-industry may
    account for more than 3 of the 8-10 positions, so the basket reflects
    the theme's breadth, not one sub-exposure.
-3. Position sizing: default to equal-weight unless a `weighting_scheme`
-   parameter specifies rank-weighted or score-weighted. If score-weighted,
-   normalize composite scores to sum to 100%, floor any position below 5%,
-   cap any position above 20%.
+3. Position sizing: default to equal_weight unless `weighting_scheme` is
+   set to score_weighted (`config/theme_create_request.schema.json` —
+   these are the only two valid values). If score_weighted, normalize
+   composite scores to sum to 100%, floor any position below 5%, cap any
+   position above 20%, then renormalize the clipped weights so the
+   basket still sums to 100% (`TRADER_SKILL.md` Hard Rule 4).
 4. If enforcing constraint 2 requires skipping a higher-ranked name for a
    lower-ranked one in an underrepresented sub-exposure, log that swap
    explicitly with the reason.
@@ -473,25 +543,35 @@ Agent to reference as "considered but excluded."
 
 ### 5.5 Report
 **Contract:** full run state → markdown document, zero new facts.
+**Canonical implementation:** `REPORT_SKILL.md` — `assemble_report_context()`
+gathers `analyst_reports`, `basket` (joined with `composite_score` via
+`get_basket_with_scores()`, §3), and `near_misses` into one dict before
+the single LLM call; `group_shared_risks()` pre-clusters risk overlaps
+across holdings by code (point 4 below is a code-verified fact the model
+describes, not a pattern it has to spot unaided); `apply_disclaimer()`
+appends the required "not investment advice" notice unconditionally
+after generation — never left to the prompt to remember.
 ```
 SystemMessage:
 
 You are an Investment Rationale Writer. You will receive the full audit
 trail: theme definition, Analyst reports, Modeling Agent factor
-breakdowns, and the Trader Agent's final basket with weights.
+breakdowns (including composite_score), and the Trader Agent's final
+basket with weights.
 
 Write a client-ready rationale document with:
 1. A 2-3 sentence theme thesis.
 2. Per-holding rationale (2-4 sentences each): why it's in the basket,
-   grounded specifically in its thematic_relevance_rationale, top-2
-   factor_contributions, and any near-term catalyst — not generic
-   boilerplate. Do not repeat the same sentence structure for every name.
+   grounded specifically in its thematic_relevance_rationale, composite_score
+   and top-2 factor_contributions, and any near-term catalyst — not
+   generic boilerplate. Do not repeat the same sentence structure for
+   every name.
 3. A short "considered but excluded" section referencing 2-3 near-miss
    names and why they didn't make the cut (this builds credibility).
-4. A risk section: aggregate the theme-level risks that appeared across
-   multiple holdings' Analyst reports (e.g. if 4 of 9 holdings share
-   regulatory risk, call that out as a basket-level risk, not just a
-   per-stock footnote).
+4. A risk section: describe the pre-clustered risk_clusters you were
+   given (each already verified to be shared by ≥2 holdings) as
+   basket-level risks, not per-stock footnotes — do not attempt to find
+   additional overlaps yourself beyond what's provided.
 
 Ground every claim in the upstream agent outputs — do not introduce new
 facts. If the Modeling Agent flagged a caveat on a held position, surface
@@ -509,8 +589,8 @@ scratch; it is a faithful synthesis of the pipeline's own outputs.
 | LLM (low-volume, high-stakes: Modeling caveats, Validator, Report) | DeepSeek v4 pro | Higher reasoning quality where it matters most |
 | Fundamentals | Financial Modeling Prep (free tier), Finnhub (free tier), SEC EDGAR (free, primary source cross-check) | Free tiers are rate-capped — caching (§2.1) is load-bearing, not optional |
 | Price/technical | yfinance, Stooq | yfinance is unofficial/ToS gray area — acceptable for internal/prototype use, revisit before commercial deployment |
-| News | GDELT (free, high volume), NewsAPI (free tier, dev-only cap) | Spread load across both rather than relying on one |
-| Sentiment | Reddit API, StockTwits API (both free tier) | |
+| News | GDELT (free, high volume), SerpApi's Google News (free tier) | Spread load across both rather than relying on one |
+| Sentiment | StockTwits API (free tier) | |
 | ETF holdings/constituents | Issuer CSVs (iShares/SPDR/Invesco), Wikipedia index lists, stockanalysis.com | Less complete for niche thematic ETFs — may need manual curation per theme |
 | Vector store | Pinecone | Scoped uses only — see §2.2 |
 | Queue/cache | Redis + Celery | Chosen over Kafka — no multi-consumer streaming need at current scale |
@@ -537,7 +617,8 @@ scratch; it is a faithful synthesis of the pipeline's own outputs.
 ## 8. Evaluation Plan
 
 Because two of the five agents are deliberately deterministic, evaluation
-splits cleanly into two tracks:
+splits cleanly into two tracks, plus a third for evaluation logic that
+needs its own home in the codebase.
 
 **A. Deterministic components (Modeling math, Trader constraints) — unit-testable, standard software testing:**
 - Unit tests on `compute_factor_scores`, `combine_scores`, `rank` against
@@ -550,31 +631,84 @@ splits cleanly into two tracks:
   fixtures.
 
 **B. LLM-driven components (Screener, Analyst, Validator, Report) — golden-set + groundedness checks:**
-- Maintain a small golden set of themes with manually-reviewed expected
-  candidate coverage (not exact match, but "does the candidate list
-  include the known obvious names for this theme").
+- **Candidate coverage golden set**: pull the top 10-15 holdings of each
+  theme's mapped ETFs (`config/sub_exposure_etf_map.yaml`) as the "known
+  obvious names" a theme's Candidate Universe should generally include.
+  Not exact-match — flags a gap if the Screener systematically misses
+  well-known names for a theme.
+- **Basket plausibility check (soft overlap, not exact match)**: verify
+  the final basket has *some* non-trivial overlap (≥2-3 tickers) with the
+  union of top-15 holdings across a theme's mapped ETFs. Zero overlap
+  across every relevant ETF is a signal worth a reviewer's attention
+  (possible Screener/Modeling malfunction); partial overlap is expected
+  and often desirable — the system intentionally scores on different
+  factors than ETF cap-weighting, so full agreement isn't the goal and
+  shouldn't be tested for. This is explicitly *not* the same check as
+  candidate coverage above: it's evaluating the Trader's final picks, not
+  the Screener's raw universe.
 - Schema validation on every agent output (already enforced at runtime via
   structured output, but re-verify in CI against the Pydantic/JSON schema).
-- Groundedness check on Analyst reports: every `sources` entry must
-  correspond to an actual tool call made in that run (catch hallucinated
-  citations) — this can be automated by cross-referencing the Langfuse
-  trace against the claimed sources.
-- Report agent: automated check that no numeric claim in `report_md`
-  is absent from the upstream `analyst_reports`/`rankings` state (a
-  simple entity/number extraction + presence check catches invented
-  figures).
+- **Groundedness check on Analyst reports** (`app/evaluation/groundedness.py`,
+  `check_analyst_groundedness`): every `sources` entry must correspond to
+  an actual tool-call result recorded in that run's Langfuse trace (catch
+  hallucinated citations). Implemented via a new `integrations/langfuse_client.py`
+  read path (querying traces is a different API surface than the
+  write-side callback already used for logging) that pulls `tool_result`
+  spans and builds a known-source set to check `sources` against. Split
+  into two runs, not one: a CI unit test against a fixture trace (fast,
+  deterministic, mocked Langfuse response), and a separate operational
+  job that runs the same checker against real recent runs for ongoing
+  quality monitoring — the latter is a post-hoc audit and must not block
+  a run's completion.
+- **Groundedness check on the Report** (`app/evaluation/groundedness.py`,
+  `check_report_groundedness`): regex-extract every number/percentage/
+  dollar figure from `report_md`, build the "allowed" set from that run's
+  `analyst_reports`/`rankings`/`baskets`, flag any extracted number that
+  doesn't match within a small rounding tolerance. This cannot be a hard
+  blocking assertion at 100% precision — legitimate rephrasing ("roughly
+  15%" vs. `14.7`) will produce some false positives — so treat flagged
+  numbers as input to the human review gate (§8.C), not an automatic
+  failure.
 
 **C. System-level:**
-- Shadow-mode comparison whenever `factor_weights` in a theme's config
-  change — rerun the same candidate set with old vs. new weights and diff
-  the resulting basket before promoting the new weights.
-- Once `basket_performance` accumulates enough history (populated
-  on-demand, per §2.1), backtest composite score against realized forward
-  return to validate the ranking is actually predictive, not just
-  self-consistent.
+- **Shadow-mode comparison** whenever `config/factor_weights.yaml` is
+  proposed to change (an ops/quant-owned edit — never a user-triggered
+  action): reuses a sample of recent runs' already-persisted
+  `analyst_reports` and `factor_panel` rows — no re-fetching, no LLM
+  calls — and reruns only `compute_factor_scores` →
+  `combine_scores(df, new_weights)` → `rank` → basket construction with
+  the proposed weights (`scripts/shadow_compare.py`). Diffs old vs. new:
+  tickers entered/left, rank deltas, composite score deltas. Kept
+  ephemeral (a diff report, not a persisted table) unless there's a
+  specific need for historical shadow-run tracking. This is only
+  possible because weights are config-file data, diffable between two
+  file versions, rather than a code-level constant that would make
+  "compare old vs. new weights" mean redeploying between runs — and it
+  stays entirely an internal/ops workflow, since there is no user-facing
+  surface that touches weighting policy at all (§2.1).
+- **Forward-looking performance tracking** (not a trailing-lookback
+  metric): each run's basket gets its *forward* return tracked in
+  `basket_performance` from its `requested_at` date onward, benchmarked
+  against the theme's own mapped reference ETF (`sub_exposure_etf_map.yaml`)
+  rather than a flat index or a fixed percentage target — this gives the
+  existing `alpha` column real, theme-relative meaning. Explicitly a
+  monitoring/feedback-loop signal (feeding the eventual learning-to-rank
+  work in §11), not a per-run pass/fail gate: by the time forward return
+  data exists for a given run, that run is long finished, so there's
+  nothing to "fail" retroactively. A trailing-lookback return of a
+  basket's *current* holdings was considered and rejected as an
+  evaluation metric — it's partially circular (momentum is already a
+  scoring factor, so trailing return partly reflects what the system was
+  built to select for, not forward skill) and a single absolute
+  threshold (e.g. a flat annual-return bar) isn't theme- or
+  regime-agnostic. A hard numeric return bar anywhere in the system's own
+  evaluation criteria also sits awkwardly next to the "not investment
+  advice" disclaimer required in §9 — keep any return-based signal
+  internal/monitoring-only, never surfaced as a claim to the End User.
 - Human review gate: no theme's basket should be treated as
   client-facing output until at least one manual review pass, especially
-  early on given free-tier data source limitations (§6).
+  early on given free-tier data source limitations (§6), and specifically
+  whenever the Report groundedness check above flags an unmatched number.
 
 ---
 
