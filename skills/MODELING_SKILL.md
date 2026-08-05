@@ -123,7 +123,7 @@ screening inputs) are computed here, in code, from free-tier vendor data.
 
 | Factor | Value | Source |
 |---|---|---|
-| `thematic_z` (raw: `thematic_relevance_score`) | 1-5 score from the Analyst's read of news/filing text | GDELT/NewsAPI text, SEC EDGAR business description |
+| `thematic_z` (raw: `thematic_relevance_score`) | 1-5 score from the Analyst's read of news/filing text | GDELT/SerpApi Google News text, SEC EDGAR business description |
 | `sentiment_z` (raw: `sentiment_label`) | Mapped `bearish=-1, neutral=0, bullish=1`, or a deterministic blend (see note below) | StockTwits % bullish, GDELT average tone |
 
 ```python

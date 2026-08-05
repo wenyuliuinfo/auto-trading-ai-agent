@@ -32,9 +32,9 @@ each I/O-bound (they call external vendor APIs), so they live in
 ```
 app/
 ├── integrations/
-│   ├── news.py                # backs get_news (GDELT + NewsAPI)
+│   ├── news.py                # backs get_news (GDELT + SerpApi Google News)
 │   ├── sec_edgar.py             # backs get_business_description (10-K/10-Q + XBRL segment revenue)
-│   └── social_sentiment.py      # backs get_social_sentiment (StockTwits + Reddit)
+│   └── social_sentiment.py      # backs get_social_sentiment (StockTwits)
 ├── agents/
 │   └── analyst.py               # imports the three functions above, holds the prompt,
 │                                 # the LLM call, estimate_revenue_pct_theme, and analyst_node
@@ -82,20 +82,20 @@ normalized) output to the LLM.
    is the high-volume, fan-out call (50-150 per Run), so cost and
    consistency matter more than creative variance here.
 9. **Each integration module normalizes its own multi-source output to
-   one shape before returning.** `news.py` merges GDELT + NewsAPI into
-   one article schema; `social_sentiment.py` merges StockTwits + Reddit
-   into one sentiment-signal schema. `agents/analyst.py` and the LLM
-   prompt should never need to know which underlying vendor a given item
-   came from beyond what's preserved in a `source` field.
+   one shape before returning.** `news.py` merges GDELT + SerpApi Google
+   News into one article schema; `social_sentiment.py` merges StockTwits
+   into one sentiment-signal schema. `agents/analyst.py` and the
+   LLM prompt should never need to know which underlying vendor a given
+   item came from beyond what's preserved in a `source` field.
 
 ## Which APIs back which output
 
 | Output field | Computed how | API(s) | Integration module |
 |---|---|---|---|
-| `thematic_relevance_score` (1-5) | LLM reads business description + recent news, judges fit to theme | SEC EDGAR (business description), GDELT/NewsAPI (news) | `sec_edgar.py`, `news.py` |
+| `thematic_relevance_score` (1-5) | LLM reads business description + recent news, judges fit to theme | SEC EDGAR (business description), GDELT/SerpApi Google News (news) | `sec_edgar.py`, `news.py` |
 | `revenue_pct_theme_estimate` | **Deterministic where possible:** parsed directly from SEC EDGAR XBRL segment revenue disclosure, matched to theme keywords. **Falls back to LLM estimate with a confidence flag** only if segment data doesn't disclose a clean split. | SEC EDGAR XBRL | `sec_edgar.py` |
-| `sentiment_label` | LLM synthesizes StockTwits bullish/bearish ratio, Reddit mention volume/tone, and GDELT average tone into one label | StockTwits API, Reddit API, GDELT | `social_sentiment.py`, `news.py` |
-| `catalysts` / `risks` | LLM extraction from recent news, grounded per-item to a source | GDELT, NewsAPI | `news.py` |
+| `sentiment_label` | LLM synthesizes StockTwits bullish/bearish ratio, and GDELT average tone into one label | StockTwits API, GDELT | `social_sentiment.py`, `news.py` |
+| `catalysts` / `risks` | LLM extraction from recent news, grounded per-item to a source | GDELT, SerpApi Google News | `news.py` |
 | `sources` | Direct references to whichever tool results backed the above | All of the above | — |
 
 ## Integration modules — reference implementation
@@ -110,9 +110,11 @@ def fetch_gdelt(ticker: str, lookback_days: int) -> list[dict]:
     client."""
     ...
 
-def fetch_newsapi(ticker: str, lookback_days: int) -> list[dict]:
-    """NewsAPI: free tier capped ~100 req/day, explicitly dev-only —
-    use sparingly, prefer GDELT as the primary source."""
+def fetch_google_news_serp(ticker: str, lookback_days: int) -> list[dict]:
+    """SerpApi Google News: free tier ~100 searches/month with 1
+    concurrent session — rate-limited, use sparingly, prefer GDELT as
+    the primary source. Queries the news_results of SerpApi's
+    google_news engine, keyed by SERP_API_KEY (see .env.example)."""
     ...
 
 def _normalize_article(raw: dict, source: str) -> dict:
@@ -124,8 +126,8 @@ def get_news(ticker: str, lookback_days: int = 90) -> list[dict]:
     sources rather than relying on one (ARCHITECTURE.md §6), and
     normalizing both into one article schema (Hard Rule 9)."""
     gdelt_articles = [_normalize_article(a, "gdelt") for a in fetch_gdelt(ticker, lookback_days)]
-    newsapi_articles = [_normalize_article(a, "newsapi") for a in fetch_newsapi(ticker, lookback_days)]
-    return dedupe_articles(gdelt_articles + newsapi_articles)
+    serp_articles = [_normalize_article(a, "google_news") for a in fetch_google_news_serp(ticker, lookback_days)]
+    return dedupe_articles(gdelt_articles + serp_articles)
 ```
 
 ### `integrations/sec_edgar.py`
@@ -176,19 +178,13 @@ def fetch_stocktwits(ticker: str, lookback_days: int) -> dict:
     """Bullish/bearish-tagged message counts over the lookback window."""
     ...
 
-def fetch_reddit_mentions(ticker: str, lookback_days: int) -> dict:
-    """Mention volume and upvote-weighted tone over the lookback window."""
-    ...
-
 def get_social_sentiment(ticker: str, lookback_days: int = 14) -> dict:
-    """Both are free-tier APIs; normalized into one signal shape
-    (Hard Rule 9) before returning to agents/analyst.py."""
+    """Free-tier API; normalized into one signal shape (Hard Rule 9)
+    before returning to agents/analyst.py."""
     stocktwits = fetch_stocktwits(ticker, lookback_days)
-    reddit = fetch_reddit_mentions(ticker, lookback_days)
     return {
         "pct_bullish": stocktwits["pct_bullish"],
-        "mention_volume": stocktwits["message_count"] + reddit["mention_count"],
-        "reddit_tone": reddit["upvote_weighted_tone"],
+        "mention_volume": stocktwits["message_count"],
     }
 ```
 
@@ -198,7 +194,7 @@ def get_social_sentiment(ticker: str, lookback_days: int = 14) -> dict:
 from app.integrations.news import get_news
 from app.integrations.sec_edgar import get_business_description, estimate_revenue_pct_theme
 from app.integrations.social_sentiment import get_social_sentiment
-from app.integrations.llm import deepseek_client
+from app.integrations.deepseek_client import deepseek_client
 from app.data.queries import get_recent_analyst_report, save_analyst_report
 
 ANALYST_MODEL = "deepseek-chat"
@@ -288,9 +284,9 @@ partway through the fan-out.
 - Cache hit path — verify no LLM/API call is made when a fresh report
   exists, and the cached report is still correctly appended into
   `analyst_reports` for the new `run_id`.
-- `get_news`/`get_social_sentiment` normalization — verify GDELT+NewsAPI
-  and StockTwits+Reddit outputs each collapse to one consistent schema
-  regardless of which underlying vendor supplied a given item.
+- `get_news`/`get_social_sentiment` normalization — verify GDELT+SerpApi
+  Google News and StockTwits outputs each collapse to one consistent
+  schema regardless of which underlying vendor supplied a given item.
 - Mock the LLM client and the `integrations/` functions, not the node
   function, per `CONVENTIONS.md` §5 — the test should exercise the real
   cache-check/error-handling logic.
