@@ -173,12 +173,12 @@ from a Scheduler, which this system does not have.
 
 ## Third-Party / External Concepts
 
-**LLM Provider** — OpenAI or DeepSeek, the two model backends used across
+**LLM Provider** — DeepSeek, the one model backend used across
 Agents, selected per-step by cost/stakes (see ARCHITECTURE.md §6).
 
 **Data Vendor** — Any external source of fundamentals, price, or news
-data (FMP, Finnhub, SEC EDGAR, yfinance, Stooq, GDELT, NewsAPI, Reddit,
-StockTwits, ETF issuer sites). Distinct from an LLM Provider.
+data (FMP, Finnhub, SEC EDGAR, yfinance, Stooq, GDELT, StockTwits,
+ETF issuer sites). Distinct from an LLM Provider.
 
 **Free tier** — The rate-capped, no-cost access level used for all Data
 Vendors in this system's current design — a hard constraint that makes DB
