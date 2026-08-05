@@ -41,6 +41,7 @@ src/app/                    # FastAPI + Celery backend
 │   │                       # attached to LangGraph invocations (§6) —
 │   │                       # different API surface, different purpose.
 │   ├── fmp.py / finnhub.py / sec_edgar.py / yfinance_client.py / gdelt.py
+    ├── news.py / social_sentiment.py / fundamentals.py / prices.py / factor_panel.py / reference_universe.py / etf_holdings.py
 │   └── pinecone_client.py
 ├── data/                   # All database access. Models + queries together.
 │   ├── models.py           # SQLAlchemy models (ARCHITECTURE.md §2.1)
@@ -227,7 +228,6 @@ When editing existing code:
 # Run — full stack via Docker Compose
 docker compose -f infra/docker-compose.yml up -d
 docker compose -f infra/docker-compose.yml up fastapi celery-worker   # backend only
-docker compose -f infra/docker-compose.yml --profile tracing up -d    # + Tempo
 
 # Run — local dev, outside compose
 uvicorn main:app --reload --port 8000

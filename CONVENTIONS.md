@@ -337,7 +337,7 @@ Mirrors the two-track split in `ARCHITECTURE.md` §8:
   `hypothesis`) encouraged for `rank`/`combine_scores` given the
   invariants stated in that section (valid permutation, monotonicity).
 - **LLM-driven node logic — mock the LLM client in `integrations/`**,
-  never the node function itself (i.e. mock `openai_client.complete()`,
+  never the node function itself (i.e. mock `deepseek_client.complete()`,
   not `analyst_node()` directly) so the actual node logic — cache check,
   schema validation, error handling — is exercised in tests.
 - **Golden-set tests run separately from unit tests** (marked
