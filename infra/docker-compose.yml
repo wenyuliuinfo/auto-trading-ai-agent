@@ -175,8 +175,8 @@ services:
 
 # ---------------------------------------------------------------------
 # NOT containerized here — external managed services referenced by env vars:
-#   - OPENAI_API_KEY / DEEPSEEK_API_KEY  (LLM providers)
-#   - PINECONE_API_KEY                    (managed vector store — no local container)
-#   - Free-tier data vendor keys: FMP, FINNHUB, NEWSAPI, etc.
+#   - DEEPSEEK_API_KEY  (LLM providers)
+#   - PINECONE_API_KEY  (local container)
+#   - Free-tier data vendor keys: FMP, FINNHUB, etc.
 # See .env.example for the full list.
 # ---------------------------------------------------------------------
