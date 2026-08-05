@@ -47,8 +47,8 @@ and a proposed basket, not investment advice (see §9, Compliance).
               ▼                ▼            ▼              ▼
           ┌────────────┐  ┌──────────────┐ ┌─────────┐  ┌───────────┐
           │ PostgreSQL │  │ LLM Providers│ │Pinecone │  │ Free data │
-          │ (system of │  │ OpenAI +     │ │(semantic│  │ APIs (§6) │
-          │ record +   │  │ DeepSeek     │ │ search, │  │ FMP/      │
+          │ (system of │  │ DeepSeek     │ │(semantic│  │ APIs (§6) │
+          │ record +   │  │              │ │ search, │  │ FMP/      │
           │ checkpoint)│  │              │ │ memory) │  │ Finnhub/  │
           └────────────┘  └──────────────┘ └─────────┘  │ GDELT/etc │
                                                         └───────────┘
@@ -445,7 +445,7 @@ to produce a grounded, source-cited analysis — not a recommendation.
 For the given ticker:
 
 1. Call `get_news(ticker, lookback_days=90)` against the connected
-   data sources (GDELT/NewsAPI (news), SEC EDGAR (business description/segment revenue), StockTwits/Reddit (sentiment)) and summarize
+   data sources (GDELT/SerpApi Google News, SEC EDGAR (business description/segment revenue), StockTwits (sentiment)) and summarize
    only what is reported — do not speculate beyond the sources.
 2. Assess thematic relevance on a 1-5 scale: does this company's revenue
    meaningfully derive from the theme, or is the connection tangential?
@@ -763,7 +763,6 @@ OpenTelemetry alongside Langfuse for infra traces).
 |---|---|---|
 | Single ticker's Analyst call fails (data vendor error, LLM error) | try/except in `analyst_node` returns an error stub into the reducer | `modeling_node` filters error stubs; run continues with remaining tickers; logged to Langfuse |
 | Free-tier data source rate limit exhausted mid-run | HTTP 429 from vendor API | Exponential backoff + fall back to a secondary free source for that data type (§6); if all exhausted, that field returns null per the Analyst contract rather than blocking the run |
-| LLM provider outage/rate limit (OpenAI or DeepSeek) | Provider error response | `.with_fallbacks()` chain routes to the other provider automatically |
 | Trader can't fill 8 slots after constraints | `check_basket_complete` conditional edge | Bounded retry (max 2) back to Screener with widened parameters; beyond that, Report agent explicitly notes the shortfall rather than the system silently failing |
 | Worker process crashes mid-fan-out (100+ tickers, partway through) | Celery task failure / missing heartbeat | LangGraph's `PostgresSaver` checkpoint allows resume from the last completed step, not a full restart from Screener |
 | Postgres unavailable | Connection error at any DB-touching node | Run marked `failed` with `error_detail`; Celery retry policy with backoff; no silent data loss since nothing is checkpointed to memory only |
