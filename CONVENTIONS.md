@@ -118,33 +118,47 @@ def combine_scores(df: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
 
 ## 2. Backend Layering
 
-Four layers, one rule: **each layer only talks to the one directly below
-it.** API calls Agents, Agents call Integrations and Data, nothing calls
-backward up the chain.
+Five layers. Four follow one rule — **each layer only talks to the one
+directly below it**, API calls Agents, Agents call Integrations and
+Data, nothing calls backward up the chain. `evaluation/` is the
+exception: it's a sibling to `agents/`, not part of the request-serving
+chain at all — see 2.1 for why.
 
 ```
 src/app/
-├── api/                # FastAPI routes. HTTP only — no business logic.
+├── api/                    # FastAPI routes. HTTP only — no business logic.
 │   ├── themes.py
 │   └── runs.py
-├── agents/              # One folder per Agent. Everything that Agent
-│   ├── screener.py       # needs — LLM call, prompt, and (for Modeling/
-│   ├── analyst.py        # Trader) the deterministic logic — lives
-│   ├── modeling.py        # together in its own file.
+├── agents/                 # One folder per Agent. Everything that Agent
+│   ├── screener.py         # needs — LLM call, prompt, and (for Modeling/
+│   ├── analyst.py          # Trader) the deterministic logic — lives
+│   ├── modeling.py         # together in its own file.
 │   ├── trader.py
 │   ├── report.py
-│   └── graph.py          # Wires the agents above into the LangGraph
-│                          # StateGraph (BasketState, nodes, edges).
-├── integrations/        # All external calls. One file per provider.
-│   ├── openai_client.py
+│   └── graph.py            # Wires the agents above into the LangGraph
+│                           # StateGraph (BasketState, nodes, edges).
+├── evaluation/             # Groundedness/golden-set checks. Reads agents'
+│   └── groundedness.py     # already-persisted output; never called from
+│                           # api/, never blocks a Run's completion.
+│                           # check_analyst_groundedness, check_report_groundedness
+│                           # (ARCHITECTURE.md §8.B).
+├── integrations/           # All external calls. One file per provider.
 │   ├── deepseek_client.py
+│   ├── langfuse_client.py  # READ path — queries traces for evaluation/.
+│   │                       # Distinct from the write-side Langfuse callback
+│   │                       # attached to LangGraph invocations (§6) —
+│   │                       # different API surface, different purpose.
 │   ├── fmp.py / finnhub.py / sec_edgar.py / yfinance_client.py / gdelt.py
 │   └── pinecone_client.py
-├── data/                 # All database access. Models + queries together.
-│   ├── models.py          # SQLAlchemy models (ARCHITECTURE.md §2.1)
-│   └── queries.py         # Plain functions: get_run(), save_basket(), ...
-├── worker.py              # Celery app + task definitions
-└── config.py              # Settings (env-driven, see §3.1)
+├── data/                   # All database access. Models + queries together.
+│   ├── models.py           # SQLAlchemy models (ARCHITECTURE.md §2.1)
+│   └── queries.py          # Plain functions: get_run(), save_basket(), ...
+├── worker.py               # Celery app + task definitions
+└── config.py               # Settings (env-driven, see §3.1)
+
+src/scripts/                # One-off/operational entry points, outside src/app/:
+└── shadow_compare.py       # Reruns agents/modeling.py's pure functions
+                            # against cached data — ARCHITECTURE.md §8.C.
 ```
 
 ### 2.1 The rule, in practice
@@ -160,20 +174,50 @@ src/app/
   separate, plainly-named functions within the file (not interleaved with
   the LLM call) so they stay easy to unit-test on their own — that
   separation is what matters, not which folder they sit in.
+- **`evaluation/` — reads, never writes to the pipeline, and is never
+  called from `api/`.** `check_analyst_groundedness` and
+  `check_report_groundedness` (`ARCHITECTURE.md` §8.B) read a completed
+  Run's already-persisted state via `data/` and its Langfuse trace via
+  `integrations/langfuse_client.py`, and produce flags for the human
+  review gate — they don't gate a Run's completion or feed back into
+  `agents/`. Invoked from two places only: a `pytest -m golden` fixture
+  test (CI), and a separate operational monitoring job (a Celery task or
+  scheduled script) that runs the same checkers against recent real
+  runs. If you find yourself calling anything in `evaluation/` from
+  `agents/` or `api/`, stop — that's the wrong direction; evaluation
+  observes the pipeline, it doesn't participate in it.
 - **`integrations/`** — the only place that calls an external API (LLM
   or data vendor). `agents/analyst.py` imports from here; it never calls
-  `requests`/`httpx` directly.
+  `requests`/`httpx` directly. Note `langfuse_client.py` specifically has
+  two unrelated call sites for two different purposes — the write-side
+  tracing callback (attached once, per LangGraph invocation, logging
+  spans as a Run executes) and this read-side query client (called only
+  from `evaluation/`, after a Run is already complete) are separate code
+  paths in the same file, not the same client reused both ways.
 - **`data/`** — the only place that touches Postgres. Everything else
   calls a plain function like `save_analyst_report(...)`, never opens a
   DB session itself.
+- **`scripts/`** — operational entry points that aren't part of the
+  request-serving app at all (not deployed as a service, run manually or
+  via a one-off job). `shadow_compare.py` lives here rather than in
+  `evaluation/` because it isn't a pass/fail check — it's a comparison
+  tool an operator runs deliberately before changing
+  `config/factor_weights.yaml`.
 - **One-line test:** if you're unsure where new code goes, ask "does it
-  call an external API?" → `integrations/`. "Does it touch the database?"
-  → `data/`. Otherwise → the relevant file in `agents/`.
+  call an external API?" → `integrations/`. "Does it touch the
+  database?" → `data/`. "Does it check/flag already-produced output
+  without participating in producing it?" → `evaluation/`. Otherwise →
+  the relevant file in `agents/`.
 
 This intentionally merges what would otherwise be separate
 `services/`/`domain/`/`repositories/` layers — for a system this size,
 one well-organized `agents/` folder per Agent is easier to navigate than
 tracing logic across five directories to understand what one Agent does.
+`evaluation/` stays separate from `agents/` specifically because it has
+a different caller (tests/ops jobs, not the graph) and a different
+contract (advisory flags, not pipeline state) — folding it into
+`agents/` would blur the "does this participate in producing a Run's
+output" question that everything else in this layout is organized around.
 
 ---
 
@@ -300,6 +344,13 @@ Mirrors the two-track split in `ARCHITECTURE.md` §8:
   `@pytest.mark.golden`, excluded from the default fast test run) since
   they hit real APIs/LLMs and cost money — run in CI on a schedule or
   pre-release, not on every commit.
+- **`evaluation/` checkers get two separate test treatments, not one:**
+  a fast CI unit test against a fixture Langfuse trace (mock
+  `langfuse_client.py`'s response, assert the checker's matching logic
+  works), and a separate manual/scheduled run against real recent Runs
+  for actual quality monitoring. Don't conflate the two — a fixture test
+  proves the checker's logic is correct; it says nothing about whether
+  today's Analyst reports are actually well-grounded.
 - Every bug fix gets a regression test before the fix, not after.
 
 ---
@@ -318,4 +369,10 @@ Mirrors the two-track split in `ARCHITECTURE.md` §8:
 - Never log full prompt/completion text to stdout/application logs —
   that's Langfuse's job; app logs should reference the Langfuse trace ID,
   not duplicate its content.
-
+- **Tagging exists to serve `integrations/langfuse_client.py`'s read
+  path, not just human debugging.** `check_analyst_groundedness`
+  (`ARCHITECTURE.md` §8.B) queries traces by `run_id` and filters
+  `tool_result` spans — if a call isn't tagged with `run_id`, it's
+  invisible to that check. Treat the tagging rule above as a hard
+  requirement for evaluation to function, not a nice-to-have for the
+  Langfuse UI.
