@@ -17,7 +17,7 @@ redis==5.2.1
 # LangGraph & LangChain
 langgraph==0.2.66
 langchain==0.3.14
-langchain-openai==0.3.2
+langchain-openai==0.3.3
 langchain-deepseek==0.1.0
 langfuse==2.57.3
 
