@@ -19,33 +19,45 @@ Before making changes, read documents in this order:
 ## 1. Repository Map
 
 ```
-src/web/                      # Next.js 16 (App Router) — theme creation, run, trigger, live run progress, basket + report display
-src/app/                      # FastAPI + Celery backend
-├── api/                      # FastAPI routes — HTTP only, no business logic
-├── agents/                   # One file per pipeline agent:
-│   ├── screener.py           # Theme → Candidate Universe
-│   ├── analyst.py            # Per-ticker qualitative research (fan-out)
-│   ├── modeling.py           # Factor scoring + ranking (deterministic)
-│   ├── trader.py             # Basket construction (deterministic)
-│   ├── report.py             # Rationale document synthesis
-│   └── graph.py              # LangGraph StateGraph assembly (BasketState, edges)
-├── integrations/             # External API clients only — one file per vendor:
-│   ├── news.py, sec_edgar.py, social_sentiment.py      # (Analyst agent)
-│   ├── fundamentals.py, prices.py, factor_panel.py     # (Modeling agent)
-│   ├── reference_universe.py, etf_holdings.py          # (Screener agent)
-│   ├── openai_client.py, deepseek_client.py
+src/web/                    # Next.js 16 (App Router) — theme creation, run, trigger, live run progress, basket + report display
+src/app/                    # FastAPI + Celery backend
+├── api/                    # FastAPI routes — HTTP only, no business logic
+├── agents/                 # One file per pipeline agent:
+│   ├── screener.py         # Theme → Candidate Universe
+│   ├── analyst.py          # Per-ticker qualitative research (fan-out)
+│   ├── modeling.py         # Factor scoring + ranking (deterministic)
+│   ├── trader.py           # Basket construction (deterministic)
+│   ├── report.py           # Rationale document synthesis
+│   └── graph.py            # LangGraph StateGraph assembly (BasketState, edges)
+├── evaluation/             # Groundedness/golden-set checks. Reads agents'
+│   └── groundedness.py     # already-persisted output; never called from
+│                           # api/, never blocks a Run's completion.
+│                           # check_analyst_groundedness, check_report_groundedness
+│                           # (ARCHITECTURE.md §8.B).
+├── integrations/           # All external calls. One file per provider.
+│   ├── deepseek_client.py
+│   ├── langfuse_client.py  # READ path — queries traces for evaluation/.
+│   │                       # Distinct from the write-side Langfuse callback
+│   │                       # attached to LangGraph invocations (§6) —
+│   │                       # different API surface, different purpose.
+│   ├── fmp.py / finnhub.py / sec_edgar.py / yfinance_client.py / gdelt.py
 │   └── pinecone_client.py
-├── data/                     # All database access
-│   ├── models.py             # SQLAlchemy models (ARCHITECTURE.md §2.1)
-│   └── queries.py            # Plain functions: get_run(), save_basket(), ...
-├── worker.py                 # Celery app + task definitions
-└── config.py                 # Settings (env-driven; ARCHITECTURE.md/CONVENTIONS.md §3.1)
-infra/                        # docker-compose.yml + observability configs (Postgres, Redis, Langfuse)
-skills/                       # ANALYST_SKILL.md, MODELING_SKILL.md...
+├── data/                   # All database access. Models + queries together.
+│   ├── models.py           # SQLAlchemy models (ARCHITECTURE.md §2.1)
+│   └── queries.py          # Plain functions: get_run(), save_basket(), ...
+├── worker.py               # Celery app + task definitions
+└── config.py               # Settings (env-driven, see §3.1)
+
+src/scripts/                # One-off/operational entry points, outside src/app/:
+└── shadow_compare.py       # Reruns agents/modeling.py's pure functions
+                            # against cached data — ARCHITECTURE.md §8.C.
+infra/                      # docker-compose.yml + observability configs (Postgres, Redis, Langfuse)
+skills/                     # ANALYST_SKILL.md, MODELING_SKILL.md, SCREENER_SKILL.md
 ```
 
 This layout is normative — see `CONVENTIONS.md` §2 for the one-directional
-dependency rule (`api/` → `agents/` → `integrations/`/`data/`) and the
+dependency rule (`api/` → `agents/` → `integrations/`/`data/`, with
+`evaluation/` as a sibling to `agents/`, not part of that chain) and the
 one-line test for where new code belongs.
 
 ## 2. Primary Agents
@@ -68,8 +80,9 @@ not roles themselves.)*
 
 ### pipeline-engineer
 - **Role**: Implements and maintains the six pipeline agents in
-  `src/app/agents/` and their `integrations/` dependencies.
-- **Scope**: `src/app/agents/`, `src/app/integrations/`
+  `app/agents/`, their `integrations/` dependencies, and the
+  groundedness/evaluation checks that observe their output.
+- **Scope**: `app/agents/`, `app/integrations/`, `app/evaluation/`, `scripts/`
 - **Constraints**:
   - Working on `screener.py`/`reference_universe.py`/`etf_holdings.py` →
     load `skills/SCREENER_SKILL.md` first.
@@ -77,12 +90,31 @@ not roles themselves.)*
     → load `skills/ANALYST_SKILL.md` first.
   - Working on `modeling.py`/`fundamentals.py`/`prices.py`/
     `factor_panel.py` → load `skills/MODELING_SKILL.md` first.
-  - Ranking (`compute_factor_scores`/`combine_scores`/`rank`) and basket
-    construction (`trader.py`) must remain deterministic — never let an
-    LLM call replace this math (`ARCHITECTURE.md` §7, `MODELING_SKILL.md`
-    Hard Rule 1).
+  - Working on `trader.py` (hard screens, diversification, sizing,
+    swap_reason) → load `skills/TRADER_SKILL.md` first.
+  - Working on `report.py` (context assembly, disclaimer, risk
+    aggregation) → load `skills/REPORT_SKILL.md` first.
+  - Ranking (`compute_factor_scores`/`combine_scores`/`rank`,
+    `MODELING_SKILL.md` Hard Rule 1) and basket construction/sizing
+    (`construct_basket`, `TRADER_SKILL.md` Hard Rule 1) must remain
+    deterministic — never let an LLM call replace either. The only
+    LLM-touched fields downstream of ranking are Modeling's `caveats`
+    and Trader's `swap_reason` — both prose explaining a decision code
+    already made, never the decision itself.
   - Every fan-out node (`analyst_node`) must check the relevant cache
     table before calling any vendor API or LLM (`ARCHITECTURE.md` §6).
+  - The "not investment advice" disclaimer (`REPORT_SKILL.md` Hard Rule
+    2) is appended by code on every generated report, unconditionally —
+    never left to the Report agent's prompt to remember.
+  - `app/evaluation/` is advisory-only — its checks (`ARCHITECTURE.md`
+    §8.B) flag output for the human review gate and must never be wired
+    into `agents/graph.py` as a blocking step. If a change would make an
+    evaluation check gate a Run's completion, that's a design decision
+    for `design-architect`, not something to add unilaterally here.
+  - `scripts/shadow_compare.py` only reruns `agents/modeling.py`'s pure
+    functions against already-persisted data — it must never call an
+    LLM or a vendor API (`ARCHITECTURE.md` §8.C); if it needs to, that
+    means Steps B/C/D stopped being pure, which is the actual bug to fix.
 - **Validation**: Skill file "Hard rules" and "Test fixtures" sections
   for whichever agent was touched must be satisfied — treat these as
   acceptance criteria, not optional guidance.
@@ -141,7 +173,8 @@ not roles themselves.)*
 | `src/app/data/models.py` (DB schema) | `pipeline-engineer` (self), `api-engineer` (contract check) |
 | `src/web/components/basket/*` or `src/web/components/report/*` | `frontend-engineer` (self), `api-engineer` (contract check) |
 | `infra/docker-compose.yml` | `infra-engineer` (self) — must update `ARCHITECTURE.md` §10 failure-mode table if a new service is added |
-| A theme's factor `weights` config | `pipeline-engineer` — run the shadow-mode comparison from `ARCHITECTURE.md` §8 before promoting new weights |
+| `config/factor_weights.yaml` | `pipeline-engineer` — run `scripts/shadow_compare.py` (`ARCHITECTURE.md` §8.C) before merging; this is never a `frontend-engineer`/`api-engineer` concern since there is no user-facing surface for it (`ARCHITECTURE.md` §2.1) |
+| `src/app/evaluation/groundedness.py` (checker logic/thresholds) | `pipeline-engineer` (self) — update `ARCHITECTURE.md` §8.B if the check's pass/flag criteria change, since that section is what a reviewer reads to know what a flag means |
 
 **Handoff artifacts:**
 - `design-architect` adds/updates a decision row in `ARCHITECTURE.md` §7
@@ -199,7 +232,7 @@ docker compose -f infra/docker-compose.yml --profile tracing up -d    # + Tempo
 # Run — local dev, outside compose
 uvicorn main:app --reload --port 8000
 celery -A app.worker worker --loglevel=info
-pnpm --dir frontend dev
+pnpm --dir src/web dev
 
 # Test & Lint — backend
 ruff check .                # lint
@@ -208,12 +241,13 @@ pytest                      # unit + integration tests (fast, default run)
 pytest -m golden            # LLM golden-set tests (hits real APIs — not run by default)
 
 # Test & Lint — frontend
-pnpm --dir frontend lint
-pnpm --dir frontend build   # type check + build
-pnpm --dir frontend test    # Vitest + React Testing Library
+pnpm --dir src/web lint
+pnpm --dir src/web build    # type check + build
+pnpm --dir src/web test     # Vitest + React Testing Library
 
 # Structural checks
-pnpm check:structure        # layer boundary tests (api/ → agents/ → integrations//data/)
+pnpm check:structure        # layer boundary tests (api/ → agents/ → integrations/ & data/;
+                            # evaluation/ must not be called from api/ or agents/)
 ```
 
 ## 5. Workflow: Feature Development
@@ -227,8 +261,15 @@ Agent analyzes the task, references `ARCHITECTURE.md` and `CONVENTIONS.md`.
 - Touches Modeling/scoring/ranking → `pipeline-engineer` leads, load
   `skills/MODELING_SKILL.md` — flag any change here to `design-architect`
   per the determinism boundary in §3
-- Touches Trader/basket construction or Validator → `pipeline-engineer`
-  leads, per `ARCHITECTURE.md` §4/§5.4/§5.5
+- Touches Trader/basket construction → `pipeline-engineer` leads, load
+  `skills/TRADER_SKILL.md`
+- Touches Report synthesis, context assembly, or the disclaimer →
+  `pipeline-engineer` leads, load `skills/REPORT_SKILL.md`
+- Touches groundedness checks or shadow-mode comparison →
+  `pipeline-engineer` leads, per `ARCHITECTURE.md` §8 — confirm whether
+  the change is a checker-logic fix (`app/evaluation/`) or a genuine
+  policy change (`config/factor_weights.yaml`) before starting, since
+  they have different review paths (§2.1's collaboration table)
 - Touches API contracts or run triggering → `api-engineer` leads
 - Touches basket/report UI or run-progress display → `frontend-engineer`
   leads
@@ -266,7 +307,7 @@ CI pipeline must pass before completion:
 - `ruff check .` / `mypy --strict app/` — backend lint + types
 - `pytest` — backend unit + integration tests
 - `pnpm check:structure` — layer boundary tests
-- `pnpm --dir frontend build` / `pnpm --dir frontend test` — frontend
+- `pnpm --dir src/web build` / `pnpm --dir src/web test` — frontend
   type check, build, and component tests
 - Golden-set tests run on a schedule/pre-release, not required for every
   merge
