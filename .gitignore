@@ -5,6 +5,20 @@ __pycache__/
 .vscode/
 *.sql
 
+# Dependencies
+node_modules/
+.pnpm-store/
+.next/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Runtime / build
+dist/
+build/
+coverage/
+
 # C extensions
 *.so
 
