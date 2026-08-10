@@ -6,7 +6,7 @@ description: Use this skill whenever writing, modifying, reviewing, or debugging
 # Trader Agent — Canonical Implementation & Rules
 
 This skill is the single source of truth for **how** the Trader agent
-turns a `RankedList` into the final 8-10 name Basket. `ARCHITECTURE.md`
+turns a `RankedList` into the final 5-10 name Basket. `ARCHITECTURE.md`
 §4.1 and §5.4 explain the contract and the responsibility boundary; this
 file is what a coding agent should load and follow *while writing the
 actual code*.
@@ -47,9 +47,9 @@ calls an `integrations/` client directly.
    ranking math.
 2. **Hard screens are applied before ranking position is considered, not
    after.** A candidate failing `min_market_cap`, `min_avg_dollar_volume`,
-   or carrying a Modeling `caveats` flag marked `"exclude"` is ineligible
-   regardless of rank — screen first, then walk the ranked list, not the
-   reverse.
+   carrying a Modeling `caveats` flag marked `"exclude"`, or having a
+   negative/missing `composite_score` is ineligible regardless of rank —
+   screen first, then walk the ranked list, not the reverse.
 3. **Diversification cap (`max_per_sub_industry`, default 3) is enforced
    by walking the ranked list top-down and skipping any candidate whose
    sub-exposure is already at cap** — never by a post-hoc filter that
@@ -71,7 +71,7 @@ calls an `integrations/` client directly.
    `rankings` at read time via a shared query function (see "Composite
    score resolution" below) — not by adding a redundant column that could
    drift out of sync with the value Modeling actually computed.
-6. **The basket target is 8-10 positions; fewer than 8 is not this
+6. **The basket target is 5-10 positions; fewer than 5 is not this
    function's problem to solve.** `construct_basket` returns whatever it
    could legitimately build under the screens/diversification rules —
    the bounded retry loop back to the Screener (`ARCHITECTURE.md` §4.2's
@@ -79,7 +79,7 @@ calls an `integrations/` client directly.
    add retry or pool-widening logic inside `trader.py` itself.
 7. **`near_misses` (the next ~5 eligible names after the cutoff) is
    always returned alongside the basket**, even when the basket came in
-   under 8 — the Report agent's "considered but excluded" section
+   under 5 — the Report agent's "considered but excluded" section
    (`REPORT_SKILL.md`) depends on this being present regardless of
    whether the retry loop later fires.
 
@@ -116,7 +116,7 @@ def get_basket_with_scores(run_id: str) -> list[dict]:
 from collections import defaultdict
 
 TARGET_BASKET_SIZE = 10
-MIN_BASKET_SIZE = 8
+MIN_BASKET_SIZE = 5
 NEAR_MISS_COUNT = 5
 
 def construct_basket(
@@ -133,7 +133,9 @@ def construct_basket(
     # Hard Rule 2 — screen before considering rank position at all
     eligible = [
         c for c in ranked_list
-        if c.get("market_cap", 0) >= min_cap
+        if c.get("composite_score") is not None
+        and c["composite_score"] >= 0
+        and c.get("market_cap", 0) >= min_cap
         and c.get("avg_dollar_volume", 0) >= min_adv
         and "exclude" not in (c.get("caveats") or [])
     ]
