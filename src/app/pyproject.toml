@@ -28,4 +28,22 @@ quote-style = "double"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["."]
 norecursedirs = [".venv", "node_modules", ".git", "__pycache__", "dist", "build"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pandas.*",
+    "scipy.*",
+    "yfinance.*",
+    "yaml",
+    "pinecone.*",
+    "langfuse.*",
+    "celery.*",
+]
+ignore_missing_imports = true
