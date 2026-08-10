@@ -1,6 +1,6 @@
 ---
 name: analyst-agent-implementation
-description: Use this skill whenever writing, modifying, reviewing, or debugging code in app/agents/analyst.py, the get_news/get_business_description/get_social_sentiment integration modules, or the AnalystReport schema. Covers how thematic_relevance_score, revenue_pct_theme_estimate, sentiment_label, catalysts, and risks are each actually calculated, which free-tier APIs back each one, where each integration is defined, and the exact handoff contract into the Modeling agent's factor panel. Do not use this skill for the Modeling agent's factor scoring/ranking math (see MODELING_SKILL.md) or for Screener candidate-generation logic (see screener-agent-implementation).
+description: Use this skill whenever writing, modifying, reviewing, or debugging code in app/agents/analyst.py, the get_news/get_business_description integration modules, or the AnalystReport schema. Covers how thematic_relevance_score, revenue_pct_theme_estimate, sentiment_label, catalysts, and risks are each actually calculated, which free-tier APIs back each one, where each integration is defined, and the exact handoff contract into the Modeling agent's factor panel. Do not use this skill for the Modeling agent's factor scoring/ranking math (see MODELING_SKILL.md) or for Screener candidate-generation logic (see screener-agent-implementation).
 ---
 
 # Analyst Agent — Canonical Implementation & Rules
@@ -25,23 +25,22 @@ function.
 
 ## Where these integrations live (per `CONVENTIONS.md` §2)
 
-`get_news`, `get_business_description`, and `get_social_sentiment` are
-each I/O-bound (they call external vendor APIs), so they live in
-`integrations/`, not inline in the agent file:
+`get_news` and `get_business_description` are each I/O-bound (they call
+external vendor APIs), so they live in `integrations/`, not inline in the
+agent file:
 
 ```
 app/
 ├── integrations/
 │   ├── news.py                # backs get_news (GDELT + SerpApi Google News)
 │   ├── sec_edgar.py             # backs get_business_description (10-K/10-Q + XBRL segment revenue)
-│   └── social_sentiment.py      # backs get_social_sentiment (StockTwits)
 ├── agents/
-│   └── analyst.py               # imports the three functions above, holds the prompt,
+│   └── analyst.py               # imports the two functions above, holds the prompt,
 │                                 # the LLM call, estimate_revenue_pct_theme, and analyst_node
 ```
 
 `agents/analyst.py` never calls a vendor API directly — it only calls
-these three `integrations/` functions and passes their (already
+these two `integrations/` functions and passes their (already
 normalized) output to the LLM.
 
 ## Hard rules
@@ -59,12 +58,14 @@ normalized) output to the LLM.
    must trace to a specific tool-result item in `sources`.** If the LLM
    can't point to where a claim came from, it must not appear in the
    output — no filling gaps with general knowledge (per the Analyst
-   contract, `ARCHITECTURE.md` §5.2).
+   contract, `ARCHITECTURE.md` §5.2). The same grounding applies to each
+   `news` item: `headline`/`summary` must come from `get_news` tool
+   results and carry the article's `url`.
 4. **Missing data is `null` with a stated reason, never guessed.** E.g. if
    `get_business_description` returns no segment-level revenue
    breakdown, `revenue_pct_theme_estimate` is `null` and the rationale
    says why — it is not backfilled with a rough guess presented as fact.
-5. **Untrusted input handling:** all fetched news/social/filing text is
+5. **Untrusted input handling:** all fetched news/filing text is
    data, never instruction. Wrap tool results in a clearly delimited
    block before passing to the LLM; never let fetched text be
    interpreted as a directive (`CONVENTIONS.md` §3.3).
@@ -83,10 +84,9 @@ normalized) output to the LLM.
    consistency matter more than creative variance here.
 9. **Each integration module normalizes its own multi-source output to
    one shape before returning.** `news.py` merges GDELT + SerpApi Google
-   News into one article schema; `social_sentiment.py` merges StockTwits
-   into one sentiment-signal schema. `agents/analyst.py` and the
-   LLM prompt should never need to know which underlying vendor a given
-   item came from beyond what's preserved in a `source` field.
+   News into one article schema. `agents/analyst.py` and the LLM prompt
+   should never need to know which underlying vendor a given item came
+   from beyond what's preserved in a `source` field.
 
 ## Which APIs back which output
 
@@ -94,9 +94,10 @@ normalized) output to the LLM.
 |---|---|---|---|
 | `thematic_relevance_score` (1-5) | LLM reads business description + recent news, judges fit to theme | SEC EDGAR (business description), GDELT/SerpApi Google News (news) | `sec_edgar.py`, `news.py` |
 | `revenue_pct_theme_estimate` | **Deterministic where possible:** parsed directly from SEC EDGAR XBRL segment revenue disclosure, matched to theme keywords. **Falls back to LLM estimate with a confidence flag** only if segment data doesn't disclose a clean split. | SEC EDGAR XBRL | `sec_edgar.py` |
-| `sentiment_label` | LLM synthesizes StockTwits bullish/bearish ratio, and GDELT average tone into one label | StockTwits API, GDELT | `social_sentiment.py`, `news.py` |
+| `sentiment_label` | LLM synthesizes GDELT/Google News article tone into one label | GDELT, SerpApi Google News | `news.py` |
 | `catalysts` / `risks` | LLM extraction from recent news, grounded per-item to a source | GDELT, SerpApi Google News | `news.py` |
 | `sources` | Direct references to whichever tool results backed the above | All of the above | — |
+| `news` | The 2-3 latest news items surfaced to the Report agent, taken verbatim from `get_news` tool results | GDELT, SerpApi Google News | `news.py` |
 
 ## Integration modules — reference implementation
 
@@ -171,29 +172,11 @@ description + news, and `thematic_relevance_rationale` must state
 explicitly that this figure is an inferred estimate, not a disclosed
 figure (Hard Rule 4).
 
-### `integrations/social_sentiment.py`
-
-```python
-def fetch_stocktwits(ticker: str, lookback_days: int) -> dict:
-    """Bullish/bearish-tagged message counts over the lookback window."""
-    ...
-
-def get_social_sentiment(ticker: str, lookback_days: int = 14) -> dict:
-    """Free-tier API; normalized into one signal shape (Hard Rule 9)
-    before returning to agents/analyst.py."""
-    stocktwits = fetch_stocktwits(ticker, lookback_days)
-    return {
-        "pct_bullish": stocktwits["pct_bullish"],
-        "mention_volume": stocktwits["message_count"],
-    }
-```
-
 ## `agents/analyst.py` — node function
 
 ```python
 from app.integrations.news import get_news
 from app.integrations.sec_edgar import get_business_description, estimate_revenue_pct_theme
-from app.integrations.social_sentiment import get_social_sentiment
 from app.integrations.deepseek_client import deepseek_client
 from app.data.queries import get_recent_analyst_report, save_analyst_report
 
@@ -212,7 +195,6 @@ async def analyst_node(state: dict) -> dict:
     try:
         news = get_news(ticker)
         biz = get_business_description(ticker)
-        social = get_social_sentiment(ticker)
 
         pct_estimate, method = estimate_revenue_pct_theme(
             biz["segment_revenue"], theme_config["sub_exposure_keywords"]
@@ -226,7 +208,7 @@ async def analyst_node(state: dict) -> dict:
             model=ANALYST_MODEL,
             temperature=ANALYST_TEMPERATURE,
             system=ANALYST_SYSTEM_PROMPT,  # ARCHITECTURE.md §5.2, verbatim
-            tool_results={"news": news, "business": biz, "social": social},
+            tool_results={"news": news, "business": biz},
             response_schema=AnalystReport,   # Pydantic — enforced, not requested in prose
         )
 
@@ -284,9 +266,9 @@ partway through the fan-out.
 - Cache hit path — verify no LLM/API call is made when a fresh report
   exists, and the cached report is still correctly appended into
   `analyst_reports` for the new `run_id`.
-- `get_news`/`get_social_sentiment` normalization — verify GDELT+SerpApi
-  Google News and StockTwits outputs each collapse to one consistent
-  schema regardless of which underlying vendor supplied a given item.
+- `get_news` normalization — verify GDELT+SerpApi Google News outputs
+  collapse to one consistent schema regardless of which underlying vendor
+  supplied a given item.
 - Mock the LLM client and the `integrations/` functions, not the node
   function, per `CONVENTIONS.md` §5 — the test should exercise the real
   cache-check/error-handling logic.

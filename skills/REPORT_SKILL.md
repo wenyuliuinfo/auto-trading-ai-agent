@@ -77,7 +77,11 @@ as part of generating it (`CONVENTIONS.md` §2.1).
    check in tests (see Test fixtures) rather than trusting the model
    unverified — repetitive "X is included because Y" templates across
    every holding is a real failure mode for this kind of generation task.
-7. **Model/temperature are fixed and centralized**, matching the
+7. **Holdings render as paragraphs, never tables.** The prompt requires
+   per-holding headings and bullet lines; `report_node` also runs
+   `_reformat_holdings_table()` before saving so any table output is
+   deterministically converted to the paragraph style.
+8. **Model/temperature are fixed and centralized**, matching the
    low-volume/high-stakes tier: `REPORT_MODEL = "deepseek-v4-pro"`
    (`ARCHITECTURE.md` §6), `REPORT_TEMPERATURE = 0.5` — higher than
    Analyst's 0.1 since prose variety is desirable here, but still
@@ -91,7 +95,12 @@ as part of generating it (`CONVENTIONS.md` §2.1).
 # agents/report.py
 
 from collections import defaultdict
-from app.data.queries import get_basket_with_scores, get_analyst_reports
+from app.data.queries import (
+    get_analyst_reports,
+    get_basket_with_scores,
+    get_candidates,
+    get_factor_panel_rows,
+)
 
 def assemble_report_context(run_id: str, theme: str, near_misses: list[dict]) -> dict:
     """Single place that gathers everything report_node hands to the LLM.
@@ -101,11 +110,25 @@ def assemble_report_context(run_id: str, theme: str, near_misses: list[dict]) ->
                                                         #   swap_reason, composite_score,
                                                         #   factor_contributions (Hard Rule 3)
     analyst_reports = {r["ticker"]: r for r in get_analyst_reports(run_id)}
+    candidates = {c["ticker"]: c for c in get_candidates(run_id)}
+    return_1y = {
+        row["ticker"]: row["raw_value"]
+        for row in get_factor_panel_rows(run_id)
+        if row["factor_name"] == "return_1y"
+    }
     risk_clusters = group_shared_risks(analyst_reports, tickers=[b["ticker"] for b in basket])
 
     return {
         "theme": theme,
-        "basket": [{**b, "analyst_report": analyst_reports.get(b["ticker"])} for b in basket],
+        "basket": [
+            {
+                **b,
+                "company_name": candidates.get(b["ticker"], {}).get("company_name"),
+                "analyst_report": analyst_reports.get(b["ticker"]),
+                "return_1y": return_1y.get(b["ticker"]),
+            }
+            for b in basket
+        ],
         "near_misses": [{**n, "analyst_report": analyst_reports.get(n["ticker"])} for n in near_misses],
         "risk_clusters": risk_clusters,   # pre-aggregated, Hard Rule 4
     }
@@ -178,7 +201,7 @@ async def report_node(state: dict) -> dict:
         input_data=context,
     )
 
-    report_md = apply_disclaimer(raw_report_md)   # Hard Rule 2 — always, not conditionally
+    report_md = apply_disclaimer(_reformat_holdings_table(raw_report_md))
     await save_report(state["run_id"], report_md)
     return {"report_md": report_md}
 ```

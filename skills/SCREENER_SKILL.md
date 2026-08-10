@@ -1,6 +1,6 @@
 ---
 name: screener-agent-implementation
-description: Use this skill whenever writing, modifying, reviewing, or debugging code in app/agents/screener.py, the search_sector/search_holdings tool functions, the assemble_candidate_universe orchestration function, the sub-exposure-to-ETF mapping config, or the reference universe loader. Covers where these tools are defined, which free data sources back each, the curated config they depend on, the LLM tool-schema registration needed to expose them as callable functions, and — critically — the actual strategy used to merge, dedupe, and cap raw tool hits into the final 50-150 ticker Candidate Universe. Do not use this skill for Analyst agent per-ticker research (see ANALYST_SKILL.md) or Modeling agent scoring (see MODELING_SKILL.md).
+description: Use this skill whenever writing, modifying, reviewing, or debugging code in app/agents/screener.py, the search_sector/search_holdings tool functions, the assemble_candidate_universe orchestration function, the sub-exposure-to-ETF mapping config, or the reference universe loader. Covers where these tools are defined, which free data sources back each, the curated config they depend on, the LLM tool-schema registration needed to expose them as callable functions, and — critically — the actual strategy used to merge, dedupe, and cap raw tool hits into the final 50-100 ticker Candidate Universe. Do not use this skill for Analyst agent per-ticker research (see ANALYST_SKILL.md) or Modeling agent scoring (see MODELING_SKILL.md).
 ---
 
 # Screener Agent — Canonical Implementation & Rules
@@ -12,7 +12,7 @@ LLM via function-calling, backed by free data sources plus one piece of
 configuration that has to be hand-curated because no free API answers it
 directly. A third function, `assemble_candidate_universe`, is what
 actually turns the LLM's per-sub-exposure tool calls into the final
-50-150 ticker Candidate Universe — see Step 3 below; this is the piece
+50-100 ticker Candidate Universe — see Step 3 below; this is the piece
 that was previously undefined. `ARCHITECTURE.md` §5.1 has the prompt
 contract; this file is the implementation this skill's coding agent
 should load and follow.
@@ -61,12 +61,11 @@ app/
 4. **Every returned ticker carries its source** (`"index:russell3000"` or
    `"etf_holdings:ICLN"`) so downstream dedup and the audit trail can
    trace where each candidate came from.
-5. **Per-issuer CSV parsing is normalized behind one interface.** iShares,
-   SPDR, and Invesco each publish holdings in a different column layout —
-   `etf_holdings.py` must expose one consistent return shape regardless
-   of issuer; issuer-specific parsing quirks stay inside that module, not
-   leaked into `agents/screener.py`.
-6. **Capping to 150 is a deterministic function, never an LLM choice.**
+5. **ETF holdings are seed-only by design.** Live issuer CSV downloads are
+   intentionally not attempted; `etf_holdings.py` reads
+   `config/etf_holdings_seed.yaml` and returns one consistent
+   `{ticker, weight}` shape.
+6. **Capping to 100 is a deterministic function, never an LLM choice.**
    `assemble_candidate_universe` (Step 3) is plain code — the LLM decides
    *which sub-exposures and search terms* to use, but never which
    individual tickers survive the cap. This mirrors the determinism
@@ -82,7 +81,7 @@ app/
 | Function | Data source | What it returns |
 |---|---|---|
 | `search_sector(keyword)` | A cached reference universe: Russell 3000 or S&P 1500 constituents with GICS sub-industry tags, sourced from Wikipedia or stockanalysis.com | Tickers whose GICS sub-industry (or, optionally, Pinecone-embedded business description — see note below) matches the keyword |
-| `search_holdings(sub_exposure)` | The curated `sub_exposure_etf_map.yaml` config resolves sub-exposure → a short list of ETF tickers; each ETF's daily holdings CSV is then fetched directly from its issuer (iShares/SPDR/Invesco all publish these free) | Constituent tickers of the mapped ETF(s) |
+| `search_holdings(sub_exposure)` | The curated `sub_exposure_etf_map.yaml` config resolves sub-exposure → a short list of ETF tickers; `etf_holdings.py` reads the bundled `etf_holdings_seed.yaml` | Seed constituents of the mapped ETF(s) |
 
 **Optional semantic supplement:** if the Pinecone semantic-candidate-
 discovery feature (`ARCHITECTURE.md` §2.2) is implemented, `search_sector`
@@ -112,10 +111,9 @@ additive, not a dependency this function requires to function at all.
    pulls from public pages, not a stable versioned API, so a periodic
    manual check that the parser still works is worth budgeting for.
 
-3. **Per-issuer CSV column mapping.** iShares/SPDR/Invesco holdings files
-   don't share a schema — `etf_holdings.py` needs a small
-   issuer-to-column-mapping table (which column is the ticker, which is
-   weight) maintained alongside the fetch logic.
+3. **ETF holdings seed file.** `config/etf_holdings_seed.yaml` is the
+   single source of ETF constituents. Maintain it by hand as ETFs change;
+   live issuer CSV fetching is intentionally not implemented.
 
 4. **LLM tool-calling schema, registered separately from the Python
    function.** The LLM needs a JSON schema describing each tool's
@@ -192,23 +190,13 @@ import pandas as pd
 with open("config/sub_exposure_etf_map.yaml") as f:
     SUB_EXPOSURE_ETF_MAP: dict[str, list[str]] = yaml.safe_load(f)
 
-ISSUER_COLUMN_MAP = {
-    "ishares": {"ticker_col": "Ticker", "weight_col": "Weight (%)"},
-    "spdr": {"ticker_col": "Identifier", "weight_col": "Index Weight"},
-    "invesco": {"ticker_col": "Holding Ticker", "weight_col": "% of Fund"},
-    "global_x": {"ticker_col": "StockTicker", "weight_col": "Weightings"},
-    "ark": {"ticker_col": "ticker", "weight_col": "weight(%)"},
-    "vaneck": {"ticker_col": "Ticker", "weight_col": "% of Net Assets"},
-    "first_trust": {"ticker_col": "Holding Ticker", "weight_col": "% of Net Assets"},
-}
+with open("config/etf_holdings_seed.yaml") as f:
+    ETF_HOLDINGS_SEED: dict[str, list[str]] = yaml.safe_load(f)
 
 def fetch_etf_holdings(etf_ticker: str) -> pd.DataFrame:
-    """Fetches and normalizes one ETF's daily holdings CSV from its
-    issuer, regardless of source column layout (Hard Rule 5)."""
-    issuer = resolve_issuer(etf_ticker)          # e.g. "ishares"
-    raw = download_holdings_csv(etf_ticker, issuer)
-    cols = ISSUER_COLUMN_MAP[issuer]
-    return raw.rename(columns={cols["ticker_col"]: "ticker", cols["weight_col"]: "weight"})
+    """Seed-only holdings; live issuer CSV downloads are not attempted."""
+    tickers = ETF_HOLDINGS_SEED.get(etf_ticker) or ETF_HOLDINGS_SEED["_fallback"]
+    return pd.DataFrame([{"ticker": ticker} for ticker in tickers])
 
 
 def search_holdings(sub_exposure: str) -> list[dict]:
@@ -227,12 +215,12 @@ def search_holdings(sub_exposure: str) -> list[dict]:
 
 ## Step 3 — Assemble & Cap the Candidate Universe (the previously-missing piece)
 
-**This is the function that actually decides which 50-150 tickers make it
+**This is the function that actually decides which 50-100 tickers make it
 into the Candidate Universe.** Neither `search_sector` nor
 `search_holdings` does this alone — each only returns raw hits for one
 sub-exposure at a time, and a theme decomposes into 3-6 sub-exposures
 (`ARCHITECTURE.md` §5.1), so their combined raw output is frequently
-either well under 50 (narrow themes) or well over 150 (a sub-exposure
+either well under 50 (narrow themes) or well over 100 (a sub-exposure
 that resolves to a broad sector ETF like `XLK`). `assemble_candidate_universe`
 is what merges, dedupes, and caps that raw output — called once, after
 `screener_node`'s LLM call finishes making its `search_sector`/
@@ -250,12 +238,12 @@ is what merges, dedupes, and caps that raw output — called once, after
    list to hit 50 — this is exactly the gap the bounded retry loop
    (`ARCHITECTURE.md` §10, capped at 2) exists to handle by widening
    search terms, not something this function should paper over.
-4. **If over 150 total**: cap using a *floor-then-fill* strategy, not a
+4. **If over 100 total**: cap using a *floor-then-fill* strategy, not a
    single global sort — this is the part that keeps the universe
    thematically balanced instead of one broad ETF drowning out
    everything else:
    - **Floor**: guarantee each sub-exposure a minimum number of slots
-     (`max(3, 150 // (2 × number_of_sub_exposures))`), taking its
+     (`max(3, 100 // (2 × number_of_sub_exposures))`), taking its
      highest-market-cap candidates first.
    - **Fill**: spend remaining slots across the whole remaining pool,
      sorted by market cap descending — market cap is used here purely as
@@ -272,7 +260,7 @@ is what merges, dedupes, and caps that raw output — called once, after
 # agents/screener.py
 
 MIN_CANDIDATES = 50
-MAX_CANDIDATES = 150
+MAX_CANDIDATES = 100
 
 def assemble_candidate_universe(
     sub_exposure_hits: dict[str, list[dict]],  # sub_exposure -> raw hits from search_sector/search_holdings
@@ -343,9 +331,8 @@ prompt's "say so explicitly" instruction, they are not silently dropped.
   can act on it.
 - Sub-exposure not present in `sub_exposure_etf_map.yaml` — `search_holdings`
   returns `[]`; verify no fallback guess is attempted.
-- Simulated stale/unparseable issuer CSV (issuer changed their column
-  layout) — should raise a clear error surfaced to the Screener node, not
-  silently return malformed tickers.
+- Missing/unparseable seed entry — verify `_fallback` is used and the run
+  continues.
 - Cache hit vs. miss for `get_reference_universe` — verify TTL expiry
   actually triggers a refetch, and a fresh cache does not.
 - `assemble_candidate_universe` with < 50 total raw hits — verify it

@@ -22,7 +22,7 @@ that produces `caveats`:
 app/
 ├── integrations/
 │   ├── fundamentals.py      # fetch_fundamentals (FMP + Finnhub)
-│   ├── prices.py            # fetch_price_history (yfinance + Stooq)
+│   ├── prices.py            # fetch_price_history (FMP EOD + yfinance + Stooq)
 │   └── factor_panel.py      # get_factor_panel: orchestrates the two above,
 │                             #   computes rsi/beta/hist_vol, returns the raw
 │                             #   (pre-z-score) factor DataFrame — Step A
@@ -104,12 +104,14 @@ ranking — that math stays in `agents/modeling.py` per Hard Rule 1.
    per-theme opt-in for this; the weights file is global (Hard Rule 2).
 10. **Cache factor panel rows in the `factor_panel` table before
     recomputing.** Same-day requests for a ticker already fetched should
-    reuse the stored row rather than re-hitting FMP/Finnhub/yfinance —
-    required given free-tier rate limits (`ARCHITECTURE.md` §6).
+    reuse the stored row rather than re-hitting FMP/Finnhub/yfinance/Stooq —
+    required given free-tier rate limits (`ARCHITECTURE.md` §6). A ticker
+    is only cache-eligible when its raw `pe_ratio` row has a non-null value;
+    all-null rows from a failed fetch must be retried, never reused.
 11. **`fundamentals.py` and `prices.py` each normalize their multi-source
     output to one shape before returning.** FMP and Finnhub have
     different field names/units for the same underlying figure; so do
-    yfinance and Stooq for price history. `factor_panel.py` should never
+    FMP EOD, yfinance and Stooq for price history. `factor_panel.py` should never
     need to know which underlying vendor supplied a given value beyond
     what's preserved in a `source` field on the raw record.
 
@@ -124,7 +126,7 @@ screening inputs) are computed here, in code, from free-tier vendor data.
 | Factor | Value | Source |
 |---|---|---|
 | `thematic_z` (raw: `thematic_relevance_score`) | 1-5 score from the Analyst's read of news/filing text | GDELT/SerpApi Google News text, SEC EDGAR business description |
-| `sentiment_z` (raw: `sentiment_label`) | Mapped `bearish=-1, neutral=0, bullish=1`, or a deterministic blend (see note below) | StockTwits % bullish, GDELT average tone |
+| `sentiment_z` (raw: `sentiment_label`) | Mapped `bearish=-1, neutral=0, bullish=1`, or a deterministic tone score (see note below) | GDELT/Google News tone |
 
 ```python
 SENTIMENT_MAP = {"bearish": -1.0, "neutral": 0.0, "bullish": 1.0}
@@ -133,19 +135,19 @@ def sentiment_label_to_numeric(label: str) -> float:
     return SENTIMENT_MAP[label]
 
 # Deterministic alternative (no LLM), if preferred for this factor specifically:
-def deterministic_sentiment_score(stocktwits_pct_bullish: float, gdelt_avg_tone: float) -> float:
-    """Blend of StockTwits bullish share (0-1) and GDELT tone (-100 to +100,
-    typical article range roughly -10 to +10). Normalize GDELT tone to
-    the same -1..1 range before blending."""
+def deterministic_sentiment_score(gdelt_avg_tone: float) -> float:
+    """Normalize GDELT tone (-100 to +100, typical article range roughly
+    -10 to +10) to a -1..1 score."""
     normalized_tone = max(min(gdelt_avg_tone / 10.0, 1.0), -1.0)
-    return 0.5 * (2 * stocktwits_pct_bullish - 1) + 0.5 * normalized_tone
+    return normalized_tone
 ```
 
 ### `integrations/fundamentals.py`
 
 ```python
 def fetch_fmp_fundamentals(ticker: str) -> dict:
-    """FMP free tier (~250 req/day). Primary fundamentals source."""
+    """FMP stable API. Primary fundamentals source; combines quote,
+    ratios-ttm, key-metrics-ttm, and annual statements."""
     ...
 
 def fetch_finnhub_fundamentals(ticker: str) -> dict:
@@ -170,24 +172,26 @@ def fetch_fundamentals(ticker: str) -> "Fundamentals":
 
 ```python
 def fetch_yfinance_prices(ticker: str, lookback_days: int) -> "PriceHistory":
-    """Primary price source. Unofficial/ToS gray area — acceptable for
+    """Fallback after FMP EOD. Unofficial/ToS gray area — acceptable for
     internal use per ARCHITECTURE.md §6; revisit before commercial use."""
     ...
 
 def fetch_stooq_prices(ticker: str, lookback_days: int) -> "PriceHistory":
-    """Fallback if yfinance is unavailable or rate-limited."""
+    """Last-resort fallback if FMP EOD and yfinance are unavailable."""
     ...
 
 def fetch_price_history(ticker: str, lookback_days: int = 504) -> "PriceHistory":
-    """Normalized close/volume series (Hard Rule 11), yfinance primary,
-    Stooq fallback. 504 trading days (~2yr) covers beta and momentum
-    lookbacks below."""
+    """Normalized close/volume series (Hard Rule 11), FMP EOD primary,
+    yfinance fallback, Stooq last resort. 504 trading days (~2yr) covers
+    beta and momentum lookbacks below."""
     ...
 ```
 
 ### `integrations/factor_panel.py` — `get_factor_panel(tickers)`
 
 ```python
+from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
 from app.integrations.fundamentals import fetch_fundamentals
 from app.integrations.prices import fetch_price_history
@@ -196,12 +200,14 @@ def get_factor_panel(tickers: list[str]) -> pd.DataFrame:
     """Build the raw (pre-z-score) factor panel for the candidate universe.
     Every column here is plain arithmetic on vendor data — no LLM call
     (Hard Rule 8). Check factor_panel table for a fresh cached row per
-    ticker before calling any vendor API (Hard Rule 10)."""
-    rows = []
-    for ticker in tickers:
+    ticker before calling any vendor API (Hard Rule 10). Tickers run in a
+    bounded thread pool; SPY is fetched once and shared for beta."""
+    benchmark_history = fetch_price_history("SPY", lookback_days=504)
+
+    def fetch_row(ticker: str) -> dict:
         fundamentals = fetch_fundamentals(ticker)
         prices = fetch_price_history(ticker)
-        rows.append({
+        return {
             "ticker": ticker,
             # --- Valuation (LOWER_IS_BETTER, sign-flip in agents/modeling.py) ---
             "pe_ratio": fundamentals.price / fundamentals.diluted_eps_ttm,
@@ -225,12 +231,15 @@ def get_factor_panel(tickers: list[str]) -> pd.DataFrame:
             # --- Liquidity/risk (screening inputs, see Hard Rule 9) ---
             "adv": (prices.volume[-20:] * prices.close[-20:]).mean(),
             "market_cap": fundamentals.market_cap,
-            "beta": compute_beta(prices.close, benchmark="SPY", lookback_days=504),
+            "beta": compute_beta(prices.close, benchmark_history=benchmark_history),
             "hist_vol": prices.close.pct_change().std() * (252 ** 0.5),  # annualized;
                                                                           # substitutes for
                                                                           # implied vol, which
                                                                           # free tiers lack
-        })
+        }
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        rows = list(executor.map(fetch_row, tickers))
     return pd.DataFrame(rows)
 
 
@@ -242,9 +251,15 @@ def compute_rsi(close: pd.Series, window: int = 14) -> float:
     return (100 - 100 / (1 + rs)).iloc[-1]
 
 
-def compute_beta(close: pd.Series, benchmark: str, lookback_days: int) -> float:
+def compute_beta(
+    close: pd.Series,
+    benchmark: str = "SPY",
+    lookback_days: int = 504,
+    benchmark_history=None,
+) -> float:
     stock_returns = close.pct_change().dropna()[-lookback_days:]
-    bench_returns = fetch_price_history(benchmark).close.pct_change().dropna()[-lookback_days:]
+    bench = benchmark_history or fetch_price_history(benchmark, lookback_days=lookback_days)
+    bench_returns = bench.close.pct_change().dropna()[-lookback_days:]
     cov = stock_returns.cov(bench_returns)
     var = bench_returns.var()
     return cov / var
@@ -285,13 +300,21 @@ def compute_factor_scores(df: pd.DataFrame, factor_cols: list[str]) -> pd.DataFr
     """Cross-sectional z-score each factor within the candidate universe.
 
     Missing values are excluded from mean/std (nan_policy="omit"), not
-    treated as zero. Caller must sign-flip LOWER_IS_BETTER factors before
-    calling this function, so that "higher z-score = better" holds for
-    every resulting column.
+    treated as zero. A factor constant across a multi-name universe has no
+    cross-sectional signal, so it maps to a neutral z-score of 0 instead of
+    NaN. Caller must sign-flip LOWER_IS_BETTER factors before calling this
+    function, so that "higher z-score = better" holds for every resulting
+    column.
     """
     out = df.copy()
     for col in factor_cols:
-        out[f"{col}_z"] = zscore(out[col], nan_policy="omit")
+        valid = out[col].dropna()
+        if len(valid) > 1 and float(valid.std(ddof=0)) == 0.0:
+            z = pd.Series(0.0, index=out.index, dtype=float)
+            z[out[col].isna()] = np.nan
+            out[f"{col}_z"] = z
+        else:
+            out[f"{col}_z"] = zscore(out[col], nan_policy="omit")
     return out
 ```
 
