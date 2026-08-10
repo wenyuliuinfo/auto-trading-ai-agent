@@ -78,13 +78,13 @@ services:
   # ---------------------------------------------------------------------
   fastapi:
     build:
-      context: ../src/app
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: src/app/Dockerfile
     container_name: fastapi
     restart: unless-stopped
-    env_file: .env
+    env_file: ../.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-thematic_basket}
+      POSTGRES_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-thematic_basket}
       REDIS_URL: redis://redis:6379/0
       LANGFUSE_HOST: http://langfuse:3000
     ports:
@@ -102,14 +102,14 @@ services:
   # ---------------------------------------------------------------------
   celery-worker:
     build:
-      context: ../src/app
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: src/app/Dockerfile
     container_name: celery-worker
     restart: unless-stopped
     command: ["celery", "-A", "app.worker", "worker", "--loglevel=info", "--concurrency=4"]
-    env_file: .env
+    env_file: ../.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-thematic_basket}
+      POSTGRES_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-thematic_basket}
       REDIS_URL: redis://redis:6379/0
       LANGFUSE_HOST: http://langfuse:3000
     depends_on:
@@ -124,11 +124,12 @@ services:
   # ---------------------------------------------------------------------
   nextjs:
     build:
-      context: ../src/web
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: src/web/Dockerfile
     container_name: nextjs
     restart: unless-stopped
     environment:
+      API_BASE_URL: http://fastapi:8000
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
     ports:
       - "3000:3000"
