@@ -41,7 +41,7 @@ Theme, from Screener through Report. Identified by a `run_id`. Never
 triggered on a schedule (see ARCHITECTURE.md, Decision: No Scheduler) —
 only by an explicit End User request.
 
-**Candidate Universe** — The bounded set of tickers (typically 50-150)
+**Candidate Universe** — The bounded set of tickers (typically 50-100)
 produced by the Screener for a given Run. Not the full market — a
 theme-scoped subset.
 
@@ -50,7 +50,7 @@ theme-scoped subset.
 Used by the Screener to structure candidate search and by the Trader to
 enforce diversification.
 
-**Basket** — The final output set of 8-10 tickers with assigned weights,
+**Basket** — The final output set of 5-10 tickers with assigned weights,
 constructed by the Trader from the Ranked List under diversification and
 liquidity constraints. This is the system's primary deliverable alongside
 the Report.
@@ -166,7 +166,7 @@ graph, stored via `PostgresSaver`, enabling resume after a crash without
 restarting from the Screener.
 
 **Retry (bounded)** — The capped (max 2) loop back to the Screener when
-the Trader can't fill the Basket to 8 names after constraints — distinct
+the Trader can't fill the Basket to 5 names after constraints — distinct
 from a Scheduler, which this system does not have.
 
 ---
@@ -177,7 +177,7 @@ from a Scheduler, which this system does not have.
 Agents, selected per-step by cost/stakes (see ARCHITECTURE.md §6).
 
 **Data Vendor** — Any external source of fundamentals, price, or news
-data (FMP, Finnhub, SEC EDGAR, yfinance, Stooq, GDELT, StockTwits,
+data (FMP, Finnhub, SEC EDGAR, yfinance, Stooq, GDELT,
 ETF issuer sites). Distinct from an LLM Provider.
 
 **Free tier** — The rate-capped, no-cost access level used for all Data

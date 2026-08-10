@@ -54,6 +54,7 @@ class AnalystReport(BaseModel):
     sentiment_label: Literal["bullish", "neutral", "bearish"]
     sentiment_evidence: list[str]
     sources: list[str]
+    news: list[dict[str, str]]   # [{headline, url, source, published_at, summary}]
 ```
 
 Rules:

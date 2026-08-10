@@ -13,7 +13,7 @@ Given an investment theme (e.g. "grid modernization"), the system:
 1. Screens a candidate universe of tickers relevant to the theme.
 2. Analyzes each candidate (fundamentals, news, sentiment).
 3. Scores and ranks the universe with a deterministic quantitative model.
-4. Constructs an 8-10 name basket under diversification/liquidity constraints.
+4. Constructs a 5-10 name basket under diversification/liquidity constraints.
 5. Produces a written rationale document.
 
 Runs are **triggered on-demand by a user request** — there is no scheduled
@@ -140,6 +140,7 @@ CREATE TABLE analyst_reports (
     sentiment_label  TEXT,
     sentiment_evidence JSONB,
     sources          JSONB,
+    news             JSONB,        -- latest news items surfaced in the Report
     fetched_at       TIMESTAMPTZ DEFAULT now(),   -- used for same-day cache lookups
     UNIQUE (ticker, run_id)
 );
@@ -236,7 +237,7 @@ not assumed to be doing anything.
 | `/runs/{run_id}/events` | GET (SSE) | Streamed progress events for live UI updates, sourced from LangGraph's streaming interface |
 | `/runs/{run_id}/basket` | GET | Final basket (ticker, weight, rank, sub_exposure, **composite_score**) once complete |
 | `/runs/{run_id}/report` | GET | Final rationale document (markdown) once complete |
-| `/runs/{run_id}/rankings` | GET | Full ranked list + factor contributions + **composite_score** (for transparency/debugging, not just the top 8-10) |
+| `/runs/{run_id}/rankings` | GET | Full ranked list + factor contributions + **composite_score** (for transparency/debugging, not just the top 5-10) |
 
 All write endpoints require auth (see §9). Read endpoints for run status
 may be public within an authenticated session but should still be scoped
@@ -266,7 +267,7 @@ cleanup.
 
 | Agent | Job | LLM-driven? | Implementation skill |
 |---|---|---|---|
-| Screener | Theme → bounded candidate list (50-150 tickers) | Yes — theme decomposition is language reasoning | `SCREENER_SKILL.md` |
+| Screener | Theme → bounded candidate list (50-100 tickers) | Yes — theme decomposition is language reasoning | `SCREENER_SKILL.md` |
 | Analyst (fan-out) | Per-ticker qualitative research → structured report | Yes — one call per candidate, parallelized | `ANALYST_SKILL.md` |
 | Modeling | Factor scoring + cross-sectional ranking | **No** for the ranking math — deterministic code. LLM only converts qualitative signals to numeric inputs and writes `caveats` text. | `MODELING_SKILL.md` |
 | Validator (optional) | Bull/bear check on top ~12 ranked names | Yes — adversarial debate, bounded to top candidates only | *(none yet — flagged gap, §11)* |
@@ -352,7 +353,7 @@ def report_node(state: BasketState) -> dict:
     return {"report_md": report_md}
 
 def check_basket_complete(state: BasketState) -> str:
-    if len(state["basket"]) >= 8 or state.get("retry_count", 0) >= 2:
+    if len(state["basket"]) >= 5 or state.get("retry_count", 0) >= 2:
         return "report"
     return "screener_retry"   # widen candidate pool and retry, capped at 2 attempts
 
@@ -420,7 +421,7 @@ of semiconductor capacity"), you will:
 2. For each sub-exposure, call the `search_holdings` and `search_sector`
    tools to pull constituent tickers from relevant thematic ETFs, GICS
    sub-industries, and index membership — do not invent tickers from memory.
-3. Deduplicate and output a candidate list of 50-150 US and major
+3. Deduplicate and output a candidate list of 50-100 US and major
    international listed equities/ETFs with: ticker, company name, GICS
    sub-industry, sub-exposure tag, market cap, and average daily dollar
    volume (for a later liquidity filter).
@@ -445,8 +446,9 @@ to produce a grounded, source-cited analysis — not a recommendation.
 For the given ticker:
 
 1. Call `get_news(ticker, lookback_days=90)` against the connected
-   data sources (GDELT/SerpApi Google News, SEC EDGAR (business description/segment revenue), StockTwits (sentiment)) and summarize
-   only what is reported — do not speculate beyond the sources.
+   data sources (GDELT/SerpApi Google News tone, SEC EDGAR business
+   description/segment revenue) and summarize only what is reported — do
+   not speculate beyond the sources.
 2. Assess thematic relevance on a 1-5 scale: does this company's revenue
    meaningfully derive from the theme, or is the connection tangential?
    State the % of revenue tied to the theme if disclosed, or your best
@@ -458,7 +460,12 @@ For the given ticker:
 Output strictly as JSON matching the AnalystReport schema: 
 {ticker, thematic_relevance_score, thematic_relevance_rationale,
  revenue_pct_theme_estimate, catalysts[], risks[], sentiment_label,
- sentiment_evidence[], sources[]}.
+ sentiment_evidence[], sources[], news[]}.
+
+Include the 2-3 most recent news items in `news`, each as
+{"headline", "url", "source", "published_at", "summary"}, taken only
+from the news tool results. The Report agent displays these directly,
+so every news item must trace to a tool result.
 
 Every factual claim must cite a source from the tool results. If data is
 unavailable for a field, output null and say why — do not fill gaps with
@@ -516,7 +523,7 @@ explanation.
 SystemMessage:
 
 You are a Portfolio Construction Agent. You take the ranked list from the
-Modeling Agent and construct an 8-10 name basket. You are not re-analyzing
+Modeling Agent and construct a 5-10 name basket. You are not re-analyzing
 company merits — the ranking is your primary input.
 
 Constraints you must enforce:
@@ -524,7 +531,7 @@ Constraints you must enforce:
    ADV < $5M, market cap < $300M, or a `caveats` flag marked "exclude"
    from the Modeling Agent.
 2. Sector/sub-exposure diversification: no single GICS sub-industry may
-   account for more than 3 of the 8-10 positions, so the basket reflects
+   account for more than 3 of the 5-10 positions, so the basket reflects
    the theme's breadth, not one sub-exposure.
 3. Position sizing: default to equal_weight unless `weighting_scheme` is
    set to score_weighted (`config/theme_create_request.schema.json` —
@@ -550,7 +557,9 @@ the single LLM call; `group_shared_risks()` pre-clusters risk overlaps
 across holdings by code (point 4 below is a code-verified fact the model
 describes, not a pattern it has to spot unaided); `apply_disclaimer()`
 appends the required "not investment advice" notice unconditionally
-after generation — never left to the prompt to remember.
+after generation — never left to the prompt to remember;
+`_reformat_holdings_table()` deterministically converts any table output
+into paragraph-style holdings before saving.
 ```
 SystemMessage:
 
@@ -564,14 +573,20 @@ Write a client-ready rationale document with:
 2. Per-holding rationale (2-4 sentences each): why it's in the basket,
    grounded specifically in its thematic_relevance_rationale, composite_score
    and top-2 factor_contributions, and any near-term catalyst — not
-   generic boilerplate. Do not repeat the same sentence structure for
-   every name.
+   generic boilerplate. For each holding include: the company name,
+   a concise "why included" summary, the latest news headline with its
+   source, and the 1-year performance figure. Do not repeat the same
+   sentence structure for every name.
 3. A short "considered but excluded" section referencing 2-3 near-miss
    names and why they didn't make the cut (this builds credibility).
 4. A risk section: describe the pre-clustered risk_clusters you were
    given (each already verified to be shared by ≥2 holdings) as
    basket-level risks, not per-stock footnotes — do not attempt to find
    additional overlaps yourself beyond what's provided.
+5. Format per-holding entries as paragraphs, never a table: each holding
+   gets a heading like `### Ticker - Company Name`, followed by
+   `**Why included:** ...`, `**Latest News:** ...`, and
+   `**1-Year Return:** ...` lines.
 
 Ground every claim in the upstream agent outputs — do not introduce new
 facts. If the Modeling Agent flagged a caveat on a held position, surface
@@ -585,13 +600,13 @@ scratch; it is a faithful synthesis of the pipeline's own outputs.
 
 | Category | Provider | Notes |
 |---|---|---|
-| LLM (high-volume, low-stakes: Analyst fan-out) | DeepSeek | Cost-optimized for 50-150 calls/run |
+| LLM (high-volume, low-stakes: Analyst fan-out) | DeepSeek | Cost-optimized for 50-100 calls/run |
 | LLM (low-volume, high-stakes: Modeling caveats, Validator, Report) | DeepSeek v4 pro | Higher reasoning quality where it matters most |
-| Fundamentals | Financial Modeling Prep (free tier), Finnhub (free tier), SEC EDGAR (free, primary source cross-check) | Free tiers are rate-capped — caching (§2.1) is load-bearing, not optional |
-| Price/technical | yfinance, Stooq | yfinance is unofficial/ToS gray area — acceptable for internal/prototype use, revisit before commercial deployment |
+| Fundamentals | Financial Modeling Prep (stable API, primary), Finnhub (free tier), SEC EDGAR (free, primary source cross-check) | FMP premium plan is required for the stable quote/ratios/EOD endpoints; caching (§2.1) is load-bearing, not optional |
+| Price/technical | FMP EOD (primary), yfinance, Stooq (fallbacks) | FMP EOD is the primary daily close/volume source; yfinance remains unofficial/ToS gray area — acceptable as a fallback for internal/prototype use, revisit before commercial deployment |
 | News | GDELT (free, high volume), SerpApi's Google News (free tier) | Spread load across both rather than relying on one |
-| Sentiment | StockTwits API (free tier) | |
-| ETF holdings/constituents | Issuer CSVs (iShares/SPDR/Invesco), Wikipedia index lists, stockanalysis.com | Less complete for niche thematic ETFs — may need manual curation per theme |
+| Sentiment | GDELT article tone, SerpApi Google News tone | Analyst derives `sentiment_label` from news tone |
+| ETF holdings/constituents | Bundled seed YAML (`config/etf_holdings_seed.yaml`), Wikipedia index lists, stockanalysis.com | Seed-only by design; live issuer CSV downloads are intentionally not attempted — may need manual curation per theme |
 | Vector store | Pinecone | Scoped uses only — see §2.2 |
 | Queue/cache | Redis + Celery | Chosen over Kafka — no multi-consumer streaming need at current scale |
 | Tracing | Langfuse (self-hosted) | LLM/agent-level tracing: prompts, completions, token usage, cost, nested spans. Native LangChain callback integration. |
@@ -611,6 +626,7 @@ scratch; it is a faithful synthesis of the pipeline's own outputs.
 | Langfuse + Prometheus/Grafana | LangSmith | Self-hosted requirement; Langfuse purpose-built for LLM tracing, Prometheus/Grafana for infra metrics — complementary, not overlapping |
 | Bounded retry loop (max 2) on basket completeness | Unlimited retry / hard failure | Avoids infinite loops while giving the Screener a chance to widen the pool once or twice |
 | Validator scoped to top ~12 only | Debate over full universe (TradingAgents-style) | Cost control — full-universe debate doesn't scale to 100+ candidates |
+| Deterministic stub mode for agents and data clients | Requiring live API keys for local development | `STUB_AGENTS=true` returns canned, seeded outputs so the full pipeline is exercisable offline and in CI; the real integration paths remain the default when keys are present, and no stub output can mutate scoring/basket math (both stay deterministic either way) |
 
 ---
 
@@ -763,7 +779,7 @@ OpenTelemetry alongside Langfuse for infra traces).
 |---|---|---|
 | Single ticker's Analyst call fails (data vendor error, LLM error) | try/except in `analyst_node` returns an error stub into the reducer | `modeling_node` filters error stubs; run continues with remaining tickers; logged to Langfuse |
 | Free-tier data source rate limit exhausted mid-run | HTTP 429 from vendor API | Exponential backoff + fall back to a secondary free source for that data type (§6); if all exhausted, that field returns null per the Analyst contract rather than blocking the run |
-| Trader can't fill 8 slots after constraints | `check_basket_complete` conditional edge | Bounded retry (max 2) back to Screener with widened parameters; beyond that, Report agent explicitly notes the shortfall rather than the system silently failing |
+| Trader can't fill 5 slots after constraints | `check_basket_complete` conditional edge | Bounded retry (max 2) back to Screener with widened parameters; beyond that, Report agent explicitly notes the shortfall rather than the system silently failing |
 | Worker process crashes mid-fan-out (100+ tickers, partway through) | Celery task failure / missing heartbeat | LangGraph's `PostgresSaver` checkpoint allows resume from the last completed step, not a full restart from Screener |
 | Postgres unavailable | Connection error at any DB-touching node | Run marked `failed` with `error_detail`; Celery retry policy with backoff; no silent data loss since nothing is checkpointed to memory only |
 | Redis unavailable | Celery task enqueue fails | FastAPI returns a clear 5xx to the client rather than silently accepting a request it can't fulfill; no in-request fallback to synchronous execution |
