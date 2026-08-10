@@ -41,7 +41,7 @@ src/app/                    # FastAPI + Celery backend
 │   │                       # attached to LangGraph invocations (§6) —
 │   │                       # different API surface, different purpose.
 │   ├── fmp.py / finnhub.py / sec_edgar.py / yfinance_client.py / gdelt.py
-    ├── news.py / social_sentiment.py / fundamentals.py / prices.py / factor_panel.py / reference_universe.py / etf_holdings.py
+    ├── news.py / fundamentals.py / prices.py / factor_panel.py / reference_universe.py / etf_holdings.py
 │   └── pinecone_client.py
 ├── data/                   # All database access. Models + queries together.
 │   ├── models.py           # SQLAlchemy models (ARCHITECTURE.md §2.1)
@@ -87,7 +87,7 @@ not roles themselves.)*
 - **Constraints**:
   - Working on `screener.py`/`reference_universe.py`/`etf_holdings.py` →
     load `skills/SCREENER_SKILL.md` first.
-  - Working on `analyst.py`/`news.py`/`sec_edgar.py`/`social_sentiment.py`
+  - Working on `analyst.py`/`news.py`/`sec_edgar.py`
     → load `skills/ANALYST_SKILL.md` first.
   - Working on `modeling.py`/`fundamentals.py`/`prices.py`/
     `factor_panel.py` → load `skills/MODELING_SKILL.md` first.
