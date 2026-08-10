@@ -1,0 +1,112 @@
+ticker,company_name,gics_subindustry,market_cap,avg_dollar_volume
+AAPL,Apple Inc.,Technology Hardware Storage & Peripherals,3400000000000,18000000000
+MSFT,Microsoft Corp.,Software,3200000000000,22000000000
+NVDA,NVIDIA Corp.,Semiconductors & Semiconductor Equipment,2800000000000,40000000000
+AMZN,Amazon.com Inc.,Broadline Retail,1900000000000,15000000000
+GOOGL,Alphabet Inc.,Interactive Media & Services,1800000000000,11000000000
+META,Meta Platforms Inc.,Interactive Media & Services,1200000000000,13000000000
+TSLA,Tesla Inc.,Automobiles,700000000000,18000000000
+AVGO,Broadcom Inc.,Semiconductors & Semiconductor Equipment,1000000000000,8000000000
+LLY,Eli Lilly & Co.,Pharmaceuticals,850000000000,6000000000
+JPM,JPMorgan Chase & Co.,Banks,600000000000,4000000000
+UNH,UnitedHealth Group Inc.,Health Care Providers & Services,550000000000,4000000000
+V,Visa Inc.,Financial Services,600000000000,5000000000
+XOM,Exxon Mobil Corp.,Oil Gas & Consumable Fuels,500000000000,5000000000
+MA,Mastercard Inc.,Financial Services,450000000000,4000000000
+COST,Costco Wholesale Corp.,Consumer Staples Merchandise Retail,400000000000,3000000000
+WMT,Walmart Inc.,Consumer Staples Merchandise Retail,600000000000,4000000000
+JNJ,Johnson & Johnson,Pharmaceuticals,380000000000,3000000000
+PG,Procter & Gamble Co.,Household Products,380000000000,2000000000
+HD,Home Depot Inc.,Specialty Retail,380000000000,3000000000
+ORCL,Oracle Corp.,Software,500000000000,7000000000
+ADBE,Adobe Inc.,Software,250000000000,3000000000
+CRM,Salesforce Inc.,Software,280000000000,4000000000
+NFLX,Netflix Inc.,Entertainment,300000000000,4000000000
+AMD,Advanced Micro Devices Inc.,Semiconductors & Semiconductor Equipment,250000000000,8000000000
+INTC,Intel Corp.,Semiconductors & Semiconductor Equipment,150000000000,6000000000
+QCOM,Qualcomm Inc.,Semiconductors & Semiconductor Equipment,180000000000,4000000000
+MU,Micron Technology Inc.,Semiconductors & Semiconductor Equipment,130000000000,5000000000
+TSM,Taiwan Semiconductor Manufacturing Co.,Semiconductors & Semiconductor Equipment,900000000000,3000000000
+ASML,ASML Holding NV,Semiconductors & Semiconductor Equipment,300000000000,2000000000
+AMAT,Applied Materials Inc.,Semiconductors & Semiconductor Equipment,180000000000,3000000000
+LRCX,Lam Research Corp.,Semiconductors & Semiconductor Equipment,120000000000,2000000000
+KLAC,KLA Corp.,Semiconductors & Semiconductor Equipment,110000000000,1500000000
+ADI,Analog Devices Inc.,Semiconductors & Semiconductor Equipment,110000000000,1500000000
+MRVL,Marvell Technology Inc.,Semiconductors & Semiconductor Equipment,120000000000,3000000000
+TXN,Texas Instruments Inc.,Semiconductors & Semiconductor Equipment,170000000000,2000000000
+NOW,ServiceNow Inc.,Software,160000000000,2000000000
+SNOW,Snowflake Inc.,Software,120000000000,3000000000
+PANW,Palo Alto Networks Inc.,Software,130000000000,2000000000
+CRWD,CrowdStrike Holdings Inc.,Software,120000000000,2500000000
+FTNT,Fortinet Inc.,Software,60000000000,1000000000
+ZS,Zscaler Inc.,Software,40000000000,800000000
+OKTA,Okta Inc.,Software,20000000000,400000000
+PLTR,Palantir Technologies Inc.,Software,350000000000,6000000000
+IBM,International Business Machines Corp.,IT Services,250000000000,2000000000
+ACN,Accenture plc,IT Services,250000000000,2000000000
+UBER,Uber Technologies Inc.,Ground Transportation,180000000000,3000000000
+ABNB,Airbnb Inc.,Hotels Restaurants & Leisure,100000000000,2000000000
+PYPL,PayPal Holdings Inc.,Financial Services,80000000000,2000000000
+AXP,American Express Co.,Consumer Finance,180000000000,1500000000
+GS,Goldman Sachs Group Inc.,Capital Markets,150000000000,1500000000
+MS,Morgan Stanley,Capital Markets,180000000000,1500000000
+BAC,Bank of America Corp.,Banks,320000000000,3000000000
+WFC,Wells Fargo & Co.,Banks,220000000000,2500000000
+C,Citigroup Inc.,Banks,140000000000,2000000000
+SCHW,Charles Schwab Corp.,Capital Markets,140000000000,1500000000
+CVX,Chevron Corp.,Oil Gas & Consumable Fuels,280000000000,3000000000
+COP,ConocoPhillips,Oil Gas & Consumable Fuels,130000000000,1500000000
+EOG,EOG Resources Inc.,Oil Gas & Consumable Fuels,70000000000,1000000000
+SLB,Schlumberger Ltd.,Energy Equipment & Services,80000000000,1500000000
+HAL,Halliburton Co.,Energy Equipment & Services,35000000000,800000000
+OXY,Occidental Petroleum Corp.,Oil Gas & Consumable Fuels,55000000000,1000000000
+PFE,Pfizer Inc.,Pharmaceuticals,160000000000,2500000000
+MRK,Merck & Co. Inc.,Pharmaceuticals,280000000000,2500000000
+ABBV,AbbVie Inc.,Pharmaceuticals,320000000000,2500000000
+TMO,Thermo Fisher Scientific Inc.,Life Sciences Tools & Services,220000000000,1500000000
+DHR,Danaher Corp.,Life Sciences Tools & Services,180000000000,1000000000
+ISRG,Intuitive Surgical Inc.,Health Care Equipment & Supplies,180000000000,1500000000
+MDT,Medtronic plc,Health Care Equipment & Supplies,110000000000,1000000000
+BSX,Boston Scientific Corp.,Health Care Equipment & Supplies,120000000000,1500000000
+ABT,Abbott Laboratories,Health Care Equipment & Supplies,200000000000,1500000000
+AMGN,Amgen Inc.,Biotechnology,150000000000,1500000000
+GILD,Gilead Sciences Inc.,Biotechnology,100000000000,1000000000
+VRTX,Vertex Pharmaceuticals Inc.,Biotechnology,120000000000,1000000000
+REGN,Regeneron Pharmaceuticals Inc.,Biotechnology,80000000000,800000000
+GE,GE Aerospace,Aerospace & Defense,180000000000,2000000000
+BA,Boeing Co.,Aerospace & Defense,150000000000,2500000000
+LMT,Lockheed Martin Corp.,Aerospace & Defense,110000000000,1000000000
+RTX,RTX Corp.,Aerospace & Defense,160000000000,1500000000
+NOC,Northrop Grumman Corp.,Aerospace & Defense,80000000000,800000000
+CAT,Caterpillar Inc.,Machinery,180000000000,1500000000
+DE,Deere & Co.,Machinery,110000000000,800000000
+ETN,Eaton Corp plc,Electrical Equipment,130000000000,1000000000
+EMR,Emerson Electric Co.,Electrical Equipment,70000000000,800000000
+GEV,GE Vernova Inc.,Electrical Equipment,150000000000,2500000000
+NEE,NextEra Energy Inc.,Electric Utilities,150000000000,1500000000
+DUK,Duke Energy Corp.,Electric Utilities,90000000000,700000000
+SO,Southern Co.,Electric Utilities,90000000000,700000000
+AEP,American Electric Power Co. Inc.,Electric Utilities,55000000000,500000000
+CEG,Constellation Energy Corp.,Independent Power and Renewable Electricity Producers,120000000000,1500000000
+VST,Vistra Corp.,Independent Power and Renewable Electricity Producers,80000000000,1500000000
+SRE,Sempra,Multi-Utilities,55000000000,500000000
+ENPH,Enphase Energy Inc.,Electrical Equipment,20000000000,400000000
+SEDG,SolarEdge Technologies Inc.,Electrical Equipment,5000000000,150000000
+FSLR,First Solar Inc.,Semiconductors & Semiconductor Equipment,25000000000,600000000
+RUN,Sunrun Inc.,Independent Power and Renewable Electricity Producers,5000000000,150000000
+TT,Trane Technologies plc,Building Products,90000000000,800000000
+EMN,Eastman Chemical Co.,Chemicals,12000000000,150000000
+LIN,Linde plc,Chemicals,200000000000,1000000000
+FCX,Freeport-McMoRan Inc.,Metals & Mining,80000000000,1500000000
+NEM,Newmont Corp.,Metals & Mining,70000000000,1000000000
+BAK,Baker Hughes Co.,Energy Equipment & Services,35000000000,700000000
+F,Ford Motor Co.,Automobiles,50000000000,2000000000
+GM,General Motors Co.,Automobiles,55000000000,1500000000
+RIVN,Rivian Automotive Inc.,Automobiles,15000000000,600000000
+LCID,Lucid Group Inc.,Automobiles,7000000000,400000000
+NIO,NIO Inc.,Automobiles,15000000000,700000000
+ALB,Albemarle Corp.,Chemicals,12000000000,400000000
+SQM,Sociedad Quimica y Minera de Chile,Chemicals,11000000000,200000000
+STM,STMicroelectronics NV,Semiconductors & Semiconductor Equipment,30000000000,300000000
+ON,ON Semiconductor Corp.,Semiconductors & Semiconductor Equipment,35000000000,600000000
+SWKS,Skyworks Solutions Inc.,Semiconductors & Semiconductor Equipment,15000000000,300000000
