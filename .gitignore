@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 .vscode/
 *.sql
+*.DS_Store
 
 # Dependencies
 node_modules/
