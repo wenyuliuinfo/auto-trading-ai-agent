@@ -721,7 +721,7 @@ needs its own home in the codebase.
   evaluation criteria also sits awkwardly next to the "not investment
   advice" disclaimer required in §9 — keep any return-based signal
   internal/monitoring-only, never surfaced as a claim to the End User.
-- Human review gate: no theme's basket should be treated as
+- **Human review gate:** no theme's basket should be treated as
   client-facing output until at least one manual review pass, especially
   early on given free-tier data source limitations (§6), and specifically
   whenever the Report groundedness check above flags an unmatched number.
