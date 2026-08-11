@@ -8,7 +8,7 @@ live orders.
 ## 0. Doc Read Order
 Before making changes, read documents in this order:
 
-1. `AGENTS.md` (this file)
+1. `AGENTS.md` - this file
 2. `CONTEXT.md` — shared vocabulary; use these terms exactly, no synonyms
 3. `ARCHITECTURE.md` — system design, data model, API contracts, decision log
 4. skills in `skills/` — canonical implementation + hard rules for the
