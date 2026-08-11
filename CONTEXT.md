@@ -128,7 +128,7 @@ basis for the Ranked List's ordering.
 produced by the Modeling Agent, including each ticker's rank and Factor
 Contributions (for auditability).
 
-**Factor Contribution** — The individual weighted-Z-score (or rank)
+**Factor Contribution** — The individual weighted-Z-score 
 component each Factor contributed to a ticker's Composite Score — kept
 alongside the score so the Report agent (and any human reviewer) can
 trace *why* a ticker ranked where it did.
