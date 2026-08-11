@@ -367,7 +367,7 @@ Mirrors the two-track split in `ARCHITECTURE.md` §8:
 - **Langfuse tags:** every LLM call is tagged with the Agent name and
   `run_id` at minimum, so a trace can be filtered per Agent or per Run
   without grepping.
-- Never log full prompt/completion text to stdout/application logs —
+- **Never log full prompt/completion text to stdout/application logs** —
   that's Langfuse's job; app logs should reference the Langfuse trace ID,
   not duplicate its content.
 - **Tagging exists to serve `integrations/langfuse_client.py`'s read
