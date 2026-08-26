@@ -223,6 +223,7 @@ Evaluation is advisory and separate from Run completion:
   (`src/app/evaluation/groundedness.py`)
 - **Golden-set checks** validate candidate coverage against known
   theme-mapped ETF holdings and flag implausible baskets
+  (`src/app/evaluation/golden_set.py`)
 - **Shadow-mode comparison** reruns only the deterministic Modeling and
   basket-construction functions against cached data when factor weights
   change (`src/scripts/shadow_compare.py`), with no LLM or vendor calls
