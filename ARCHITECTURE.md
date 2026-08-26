@@ -651,7 +651,11 @@ needs its own home in the codebase.
   theme's mapped ETFs (`config/sub_exposure_etf_map.yaml`) as the "known
   obvious names" a theme's Candidate Universe should generally include.
   Not exact-match — flags a gap if the Screener systematically misses
-  well-known names for a theme.
+  well-known names for a theme. Implemented as
+  `check_candidate_coverage(run_id)` in `app/evaluation/golden_set.py`;
+  it flags a sub-exposure when the Candidate Universe contains fewer than
+  half of the first 15 seed holdings across that sub-exposure's mapped
+  ETFs.
 - **Basket plausibility check (soft overlap, not exact match)**: verify
   the final basket has *some* non-trivial overlap (≥2-3 tickers) with the
   union of top-15 holdings across a theme's mapped ETFs. Zero overlap
