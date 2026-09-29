@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 .vscode/
 *.sql
+!infra/init.sql
 *.DS_Store
 
 # Dependencies
