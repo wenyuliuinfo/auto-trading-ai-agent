@@ -15,11 +15,11 @@ from app.data.queries import (
     save_report,
 )
 from app.evaluation import golden_set
+from app.evaluation.golden_set import check_candidate_coverage
 from app.evaluation.groundedness import (
     check_analyst_groundedness,
     check_report_groundedness,
 )
-from app.evaluation.golden_set import check_candidate_coverage
 from app.evaluation.hallucination_rate import (
     HALLUCINATION_RATE_LIMIT,
     analyst_hallucination_rate,
