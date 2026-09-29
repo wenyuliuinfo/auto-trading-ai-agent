@@ -30,6 +30,12 @@ docker compose --env-file .env -f infra/docker-compose.yml down
 Copy `.env.example` at the repository root to `.env` and fill in real
 values. `.env.example` is the canonical list; the main groups are:
 
+The browser talks to the Next.js server only; Next.js rewrites `/themes/*`
+and `/runs/*` to FastAPI over the internal compose network. This keeps the
+public IP out of the frontend bundle, so the same image works on any host.
+Keep `API_BASE_URL` at `http://fastapi:8000` for Docker, or
+`http://localhost:8000` for local `pnpm dev`.
+
 ```
 # === Domain Postgres ===
 POSTGRES_DB_HOST=localhost

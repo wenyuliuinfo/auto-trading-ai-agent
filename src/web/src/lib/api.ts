@@ -1,11 +1,10 @@
-const DEFAULT_API_BASE = "http://localhost:8000";
-
 function resolveApiBase(): string {
-  const configured =
-    typeof window === "undefined"
-      ? process.env.API_BASE_URL?.trim()
-      : process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-  return (configured || DEFAULT_API_BASE).replace(/\/+$/, "");
+  // Server components need an absolute internal URL; browser code uses
+  // same-origin requests that Next.js rewrites to FastAPI (see next.config.ts).
+  if (typeof window === "undefined") {
+    return (process.env.API_BASE_URL || "http://localhost:8000").replace(/\/+$/, "");
+  }
+  return "";
 }
 
 export const API_BASE = resolveApiBase();

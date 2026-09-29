@@ -87,6 +87,7 @@ services:
       POSTGRES_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-thematic_basket}
       REDIS_URL: redis://redis:6379/0
       LANGFUSE_HOST: http://langfuse:3000
+      PINECONE_HOST_URL: http://pinecone-local:5080
     ports:
       - "8000:8000"
     depends_on:
@@ -112,6 +113,7 @@ services:
       POSTGRES_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-thematic_basket}
       REDIS_URL: redis://redis:6379/0
       LANGFUSE_HOST: http://langfuse:3000
+      PINECONE_HOST_URL: http://pinecone-local:5080
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -126,11 +128,14 @@ services:
     build:
       context: ..
       dockerfile: src/web/Dockerfile
+      args:
+        # Internal service name for Next.js server-side rewrites/proxying.
+        API_BASE_URL: http://fastapi:8000
     container_name: nextjs
     restart: unless-stopped
     environment:
+      # Server-side base URL used by Next.js server components and rewrites.
       API_BASE_URL: http://fastapi:8000
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
     ports:
       - "3000:3000"
     depends_on:
@@ -165,7 +170,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD}@langfuse-db:5432/langfuse
-      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:3001}
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-mysecret}
       SALT: ${LANGFUSE_SALT:-mysaltkey}
     ports:

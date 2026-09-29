@@ -4,6 +4,11 @@ WORKDIR /workspace
 # Pin pnpm version (CONVENTIONS.md §3.5 — pin exact versions)
 RUN npm install -g pnpm@9.15.0
 
+# The Next.js server rewrites browser requests to this internal FastAPI URL.
+# It is baked into the routes manifest at build time.
+ARG API_BASE_URL=http://localhost:8000
+ENV API_BASE_URL=${API_BASE_URL}
+
 # Workspace manifests first so dependency installation can be cached
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY src/web/package.json ./src/web/package.json
