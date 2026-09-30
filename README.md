@@ -6,6 +6,8 @@ deterministic factor math, constructs a 5-10 name Basket, and writes a
 grounded Rationale Report. It never places, modifies, or executes live
 orders.
 
+[Click here to try the Live App](http://139.224.47.180:3000/)
+
 ## Overview
 
 End users create or select a Theme through the Next.js UI, trigger a Run,
