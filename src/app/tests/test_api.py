@@ -64,6 +64,30 @@ def test_unknown_sub_exposure_rejected(client) -> None:
     assert response.status_code == 422
 
 
+def test_list_sub_exposures_from_config(client) -> None:
+    response = client.get("/themes/sub-exposures")
+    assert response.status_code == 200
+    body = response.json()
+    assert "smart_grid" in body
+    assert "transmission_equipment" in body
+
+
+def test_delete_theme(client) -> None:
+    payload = {
+        "name": "Delete me",
+        "definition": "A theme created only to test deletion.",
+        "sub_exposures": ["smart_grid", "utilities", "grid_modernization"],
+    }
+    created = client.post("/themes", json=payload)
+    assert created.status_code == 201, created.text
+    theme_id = created.json()["theme_id"]
+
+    deleted = client.delete(f"/themes/{theme_id}")
+    assert deleted.status_code == 204
+    assert client.get(f"/themes/{theme_id}").status_code == 404
+    assert client.delete(f"/themes/{theme_id}").status_code == 404
+
+
 def test_basket_returns_empty_for_complete_run_without_holdings(client, monkeypatch) -> None:
     async def fake_get_run(run_id: str) -> dict[str, object]:
         return {

@@ -4,6 +4,9 @@ import { api } from "@/lib/api";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const themes = await api.listThemes().catch(() => []);
-  return <ThemeWorkspace initialThemes={themes} />;
+  const [themes, subExposures] = await Promise.all([
+    api.listThemes().catch(() => []),
+    api.listSubExposures().catch(() => []),
+  ]);
+  return <ThemeWorkspace initialThemes={themes} subExposures={subExposures} />;
 }

@@ -121,6 +121,17 @@ async def list_themes() -> list[JSONDict]:
         return [_theme_dict(row) for row in result.scalars().all()]
 
 
+async def delete_theme(theme_id: str) -> bool:
+    """Delete one Theme; returns False when it does not exist."""
+    async with get_session() as session:
+        theme = await session.get(Theme, _u(theme_id))
+        if theme is None:
+            return False
+        await session.delete(theme)
+        await session.commit()
+        return True
+
+
 # --- Runs -----------------------------------------------------------------
 
 

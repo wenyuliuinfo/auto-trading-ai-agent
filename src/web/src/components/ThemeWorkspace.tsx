@@ -9,9 +9,13 @@ import { ThemeList } from "./ThemeList";
 
 interface ThemeWorkspaceProps {
   initialThemes: Theme[];
+  subExposures: string[];
 }
 
-export function ThemeWorkspace({ initialThemes }: ThemeWorkspaceProps) {
+export function ThemeWorkspace({
+  initialThemes,
+  subExposures,
+}: ThemeWorkspaceProps) {
   const [themes, setThemes] = useState(initialThemes);
 
   return (
@@ -28,9 +32,17 @@ export function ThemeWorkspace({ initialThemes }: ThemeWorkspaceProps) {
       </div>
       <div className="workspace-grid">
         <ThemeForm
+          availableSubExposures={subExposures}
           onCreated={(theme) => setThemes((current) => [theme, ...current])}
         />
-        <ThemeList themes={themes} />
+        <ThemeList
+          themes={themes}
+          onDeleted={(themeId) =>
+            setThemes((current) =>
+              current.filter((theme) => theme.theme_id !== themeId),
+            )
+          }
+        />
       </div>
     </div>
   );

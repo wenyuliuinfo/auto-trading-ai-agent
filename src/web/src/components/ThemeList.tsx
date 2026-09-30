@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Boxes, Play } from "lucide-react";
+import { ArrowRight, Boxes, Play, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -9,11 +9,13 @@ import { SpotlightCard } from "./SpotlightCard";
 
 interface ThemeListProps {
   themes: Theme[];
+  onDeleted: (themeId: string) => void;
 }
 
-export function ThemeList({ themes }: ThemeListProps) {
+export function ThemeList({ themes, onDeleted }: ThemeListProps) {
   const router = useRouter();
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function runTheme(theme: Theme) {
@@ -28,6 +30,22 @@ export function ThemeList({ themes }: ThemeListProps) {
     } catch (err) {
       setRunningId(null);
       setError(err instanceof Error ? err.message : "Failed to start run");
+    }
+  }
+
+  async function deleteTheme(theme: Theme) {
+    if (!window.confirm(`Delete "${theme.name}" and all of its runs?`)) {
+      return;
+    }
+    setDeletingId(theme.theme_id);
+    setError(null);
+    try {
+      await api.deleteTheme(theme.theme_id);
+      onDeleted(theme.theme_id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete theme");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -73,6 +91,16 @@ export function ThemeList({ themes }: ThemeListProps) {
               <button className="btn" onClick={() => router.push(`/theme/${theme.theme_id}`)}>
                 Open
                 <ArrowRight size={15} aria-hidden />
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={() => void deleteTheme(theme)}
+                disabled={deletingId === theme.theme_id}
+                aria-label={`Delete ${theme.name}`}
+                title={`Delete ${theme.name}`}
+              >
+                <Trash2 size={15} aria-hidden />
+                {deletingId === theme.theme_id ? "Deleting..." : "Delete"}
               </button>
             </div>
           </div>

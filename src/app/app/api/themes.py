@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from app.config import load_factor_weights, load_sub_exposure_etf_map
-from app.data.queries import create_theme, get_theme, list_themes
+from app.data.queries import create_theme, delete_theme, get_theme, list_themes
 from app.schemas import ThemeCreateRequest, ThemeResponse
 
 router = APIRouter(prefix="/themes", tags=["themes"])
@@ -61,9 +61,24 @@ async def get_themes() -> list[ThemeResponse]:
     return [ThemeResponse.model_validate(theme) for theme in themes]
 
 
+@router.get("/sub-exposures", response_model=list[str])
+async def get_sub_exposures() -> list[str]:
+    """Return the configured sub-exposure keys for the Theme form."""
+    return sorted(load_sub_exposure_etf_map())
+
+
 @router.get("/{theme_id}", response_model=ThemeResponse)
 async def get_theme_by_id(theme_id: str) -> ThemeResponse:
     theme = await get_theme(theme_id)
     if theme is None:
         raise HTTPException(status_code=404, detail="theme not found")
     return ThemeResponse.model_validate(theme)
+
+
+@router.delete("/{theme_id}", status_code=204, response_class=Response)
+async def delete_theme_by_id(theme_id: str) -> Response:
+    """Delete a saved Theme and its cascade-dependent Run data."""
+    deleted = await delete_theme(theme_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="theme not found")
+    return Response(status_code=204)

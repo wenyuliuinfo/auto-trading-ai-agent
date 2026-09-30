@@ -17,19 +17,33 @@ describe("ThemeForm", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const onCreated = vi.fn();
-    render(<ThemeForm onCreated={onCreated} />);
+    render(
+      <ThemeForm
+        availableSubExposures={[
+          "smart_grid",
+          "utilities",
+          "grid_modernization",
+          "solar",
+        ]}
+        onCreated={onCreated}
+      />,
+    );
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Grid" } });
     fireEvent.change(screen.getByLabelText("Definition"), { target: { value: "Grid def" } });
-    fireEvent.change(screen.getByLabelText("Sub-exposures (comma separated)"), {
-      target: { value: "smart_grid, utilities" },
-    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "smart_grid" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "utilities" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "grid_modernization" }));
     fireEvent.click(screen.getByRole("button", { name: /create theme/i }));
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.sub_exposures).toEqual(["smart_grid", "utilities"]);
+    expect(body.sub_exposures).toEqual([
+      "smart_grid",
+      "utilities",
+      "grid_modernization",
+    ]);
     expect(body).not.toHaveProperty("factor_weights");
     vi.unstubAllGlobals();
   });

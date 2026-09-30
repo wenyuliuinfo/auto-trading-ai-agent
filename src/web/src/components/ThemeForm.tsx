@@ -6,13 +6,20 @@ import { FormEvent, useState } from "react";
 import { api, Theme, ThemeCreateRequest } from "@/lib/api";
 
 interface ThemeFormProps {
+  availableSubExposures: string[];
   onCreated: (theme: Theme) => void;
 }
 
-export function ThemeForm({ onCreated }: ThemeFormProps) {
+const MIN_SUB_EXPOSURES = 3;
+const MAX_SUB_EXPOSURES = 6;
+
+export function ThemeForm({
+  availableSubExposures,
+  onCreated,
+}: ThemeFormProps) {
   const [name, setName] = useState("");
   const [definition, setDefinition] = useState("");
-  const [subExposures, setSubExposures] = useState("");
+  const [subExposures, setSubExposures] = useState<string[]>([]);
   const [weightingScheme, setWeightingScheme] = useState<
     "equal_weight" | "score_weighted"
   >("equal_weight");
@@ -20,15 +27,28 @@ export function ThemeForm({ onCreated }: ThemeFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function toggleSubExposure(subExposure: string) {
+    setSubExposures((current) => {
+      if (current.includes(subExposure)) {
+        return current.filter((item) => item !== subExposure);
+      }
+      if (current.length >= MAX_SUB_EXPOSURES) {
+        return current;
+      }
+      return [...current, subExposure];
+    });
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (subExposures.length < MIN_SUB_EXPOSURES) {
+      setError(`Select at least ${MIN_SUB_EXPOSURES} sub-exposures.`);
+      return;
+    }
     const payload: ThemeCreateRequest = {
       name,
       definition,
-      sub_exposures: subExposures
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
+      sub_exposures: subExposures,
       weighting_scheme: weightingScheme,
       validator_enabled: validatorEnabled,
     };
@@ -39,7 +59,7 @@ export function ThemeForm({ onCreated }: ThemeFormProps) {
       onCreated(theme);
       setName("");
       setDefinition("");
-      setSubExposures("");
+      setSubExposures([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Creation failed");
     } finally {
@@ -81,17 +101,40 @@ export function ThemeForm({ onCreated }: ThemeFormProps) {
         />
       </div>
       <div className="field-row">
-        <label className="label" htmlFor="theme-sub-exposures">
-          Sub-exposures (comma separated)
-        </label>
-        <input
-          id="theme-sub-exposures"
-          className="field"
-          value={subExposures}
-          onChange={(event) => setSubExposures(event.target.value)}
-          placeholder="transmission_equipment, smart_grid, battery_storage"
-          required
-        />
+        <div className="label sub-exposure-label">
+          Sub-exposures
+          <span className="sub-exposure-count">
+            {subExposures.length}/{MAX_SUB_EXPOSURES}
+          </span>
+        </div>
+        {availableSubExposures.length === 0 ? (
+          <div className="form-error" role="alert">
+            No sub-exposures are available.
+          </div>
+        ) : (
+          <div className="sub-exposure-grid">
+            {availableSubExposures.map((subExposure) => {
+              const checked = subExposures.includes(subExposure);
+              const disabled =
+                !checked && subExposures.length >= MAX_SUB_EXPOSURES;
+              return (
+                <label
+                  key={subExposure}
+                  className={`sub-exposure-option${disabled ? " sub-exposure-option-disabled" : ""}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="checkbox"
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => toggleSubExposure(subExposure)}
+                  />
+                  <span>{subExposure}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
       </div>
       <div className="form-grid-2" style={{ marginBottom: "0.8rem" }}>
         <div>

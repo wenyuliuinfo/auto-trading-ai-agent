@@ -72,6 +72,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
+  if (response.status === 204) {
+    return undefined as T;
+  }
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`API ${response.status}: ${detail}`);
@@ -81,9 +84,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listThemes: () => request<Theme[]>("/themes"),
+  listSubExposures: () => request<string[]>("/themes/sub-exposures"),
   getTheme: (themeId: string) => request<Theme>(`/themes/${themeId}`),
   createTheme: (payload: ThemeCreateRequest) =>
     request<Theme>("/themes", { method: "POST", body: JSON.stringify(payload) }),
+  deleteTheme: (themeId: string) =>
+    request<void>(`/themes/${themeId}`, { method: "DELETE" }),
   triggerRun: (themeId: string) =>
     request<{ run_id: string; status: "queued" }>(
       `/themes/${themeId}/runs`,
