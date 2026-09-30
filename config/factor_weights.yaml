@@ -21,12 +21,14 @@
 # against this file, and again structurally via
 # config/theme_config.schema.json.
 
-thematic_z: 0.30
-growth_z: 0.20
-quality_z: 0.15
-valuation_z: 0.15
-momentum_z: 0.10
+thematic_z: 0.27
+growth_z: 0.18
+quality_z: 0.13
+valuation_z: 0.13
+momentum_z: 0.09
 sentiment_z: 0.10
+liquidity_z: 0.05
+volatility_z: 0.05
 
 # To propose a change: edit this file, run scripts/shadow_compare.py
 # against a sample of recent runs to see the impact (ARCHITECTURE.md
