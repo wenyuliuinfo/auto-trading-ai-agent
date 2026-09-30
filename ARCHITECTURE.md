@@ -231,7 +231,10 @@ not assumed to be doing anything.
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/themes` | POST | Create a theme (`name`, `definition`, `sub_exposures`, optionally `screens`/`weighting_scheme`/`validator_enabled` — see `config/theme_create_request.schema.json`). **`factor_weights` is never accepted here or anywhere** — it's loaded server-side from `config/factor_weights.yaml`; a request that includes it gets a 422. |
+| `/themes` | GET | List saved themes |
+| `/themes/sub-exposures` | GET | List the configured sub-exposure choices sourced from `config/sub_exposure_etf_map.yaml` |
 | `/themes/{theme_id}` | GET | Fetch a theme's definition/config |
+| `/themes/{theme_id}` | DELETE | Delete a saved theme; cascades to its runs and pipeline artifacts |
 | `/themes/{theme_id}/runs` | POST | Trigger a pipeline run for this theme. Enqueues to Celery, returns `{run_id, status: "queued"}` immediately — never runs the graph synchronously in the request handler. |
 | `/runs/{run_id}` | GET | Run status/progress (`queued \| running \| complete \| failed`, plus `progress: {analyzed: 42, total: 120}` while running) |
 | `/runs/{run_id}/events` | GET (SSE) | Streamed progress events for live UI updates, sourced from LangGraph's streaming interface |
