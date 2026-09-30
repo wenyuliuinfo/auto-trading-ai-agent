@@ -629,6 +629,7 @@ scratch; it is a faithful synthesis of the pipeline's own outputs.
 | Langfuse + Prometheus/Grafana | LangSmith | Self-hosted requirement; Langfuse purpose-built for LLM tracing, Prometheus/Grafana for infra metrics — complementary, not overlapping |
 | Bounded retry loop (max 2) on basket completeness | Unlimited retry / hard failure | Avoids infinite loops while giving the Screener a chance to widen the pool once or twice |
 | Validator scoped to top ~12 only | Debate over full universe (TradingAgents-style) | Cost control — full-universe debate doesn't scale to 100+ candidates |
+| Score `volatility` (lower 3m realized vol) and `liquidity` (higher turnover, lower Amihud) | Keep `vol_3m`/`turnover_3m`/`amihud_3m` as Trader-only screens | Adds tradability/risk tilt while keeping `adv`/`market_cap`/`beta`/`hist_vol` as hard screens; weights are small (5% each) to limit double influence. Legacy themes keep their frozen 6-key weights and rankings. |
 | Deterministic stub mode for agents and data clients | Requiring live API keys for local development | `STUB_AGENTS=true` returns canned, seeded outputs so the full pipeline is exercisable offline and in CI; the real integration paths remain the default when keys are present, and no stub output can mutate scoring/basket math (both stay deterministic either way) |
 
 ---

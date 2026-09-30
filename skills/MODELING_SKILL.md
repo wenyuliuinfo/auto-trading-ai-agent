@@ -95,19 +95,21 @@ ranking — that math stays in `agents/modeling.py` per Hard Rule 1.
    derived inputs anywhere in this pipeline stage, and they arrive
    pre-computed from the Analyst agent (`ANALYST_SKILL.md`); this file
    only converts them to numeric form (see Step A, "LLM-derived factors").
-9. **Liquidity/risk factors (`adv`, `market_cap`, `beta`, `hist_vol`) are
-   screening inputs for the Trader agent, not scored composite inputs by
-   default.** Do not add them to `config/factor_weights.yaml` unless
-   that's a deliberate, reviewed global policy change — conflating "used
-   to exclude" with "used to rank" silently changes what the composite
-   score means for every theme created after the change. There is no
-   per-theme opt-in for this; the weights file is global (Hard Rule 2).
+9. **`adv`, `market_cap`, `beta`, and `hist_vol` remain screening inputs
+   for the Trader agent.** `vol_3m`, `turnover_3m`, and `amihud_3m` are
+   scored inputs feeding the `volatility` and `liquidity` composite
+   factors. This split was adopted as a deliberate global policy change;
+   a name may therefore be both screened on `adv`/`hist_vol` and scored on
+   liquidity/volatility, with the small weights in `factor_weights.yaml`
+   limiting double influence.
 10. **Cache factor panel rows in the `factor_panel` table before
     recomputing.** Same-day requests for a ticker already fetched should
     reuse the stored row rather than re-hitting FMP/Finnhub/yfinance/Stooq —
     required given free-tier rate limits (`ARCHITECTURE.md` §6). A ticker
-    is only cache-eligible when its raw `pe_ratio` row has a non-null value;
-    all-null rows from a failed fetch must be retried, never reused.
+    is only cache-eligible when its raw `pe_ratio` row has a non-null value
+    and rows exist for `vol_3m`, `turnover_3m`, and `amihud_3m` (existence,
+    not non-null, so a genuine new listing with null values is not refetched
+    forever). All-null rows from a failed fetch must be retried, never reused.
 11. **`fundamentals.py` and `prices.py` each normalize their multi-source
     output to one shape before returning.** FMP and Finnhub have
     different field names/units for the same underlying figure; so do
@@ -117,9 +119,10 @@ ranking — that math stays in `agents/modeling.py` per Hard Rule 1.
 
 ## Step A — Factor Definitions & Calculation
 
-Seven factors feed the pipeline. Two are LLM-derived and arrive already
-computed from the Analyst agent; the other five (plus the liquidity/risk
-screening inputs) are computed here, in code, from free-tier vendor data.
+Eight scored factors feed the pipeline. Two are LLM-derived and arrive
+already computed from the Analyst agent; the other six (plus the
+`adv`/`market_cap`/`beta`/`hist_vol` screening inputs) are computed here,
+in code, from free-tier vendor data.
 
 ### LLM-derived factors (computed by the Analyst agent, not here)
 
@@ -196,6 +199,10 @@ import pandas as pd
 from app.integrations.fundamentals import fetch_fundamentals
 from app.integrations.prices import fetch_price_history
 
+TRADING_DAYS = 252
+RISK_WINDOW = 63
+RISK_MIN_OBS = 40
+
 def get_factor_panel(tickers: list[str]) -> pd.DataFrame:
     """Build the raw (pre-z-score) factor panel for the candidate universe.
     Every column here is plain arithmetic on vendor data — no LLM call
@@ -207,6 +214,7 @@ def get_factor_panel(tickers: list[str]) -> pd.DataFrame:
     def fetch_row(ticker: str) -> dict:
         fundamentals = fetch_fundamentals(ticker)
         prices = fetch_price_history(ticker)
+        shares_outstanding = fundamentals.market_cap / fundamentals.price
         return {
             "ticker": ticker,
             # --- Valuation (LOWER_IS_BETTER, sign-flip in agents/modeling.py) ---
@@ -236,6 +244,9 @@ def get_factor_panel(tickers: list[str]) -> pd.DataFrame:
                                                                           # substitutes for
                                                                           # implied vol, which
                                                                           # free tiers lack
+            "vol_3m": compute_vol_3m(prices.close),
+            "turnover_3m": compute_turnover_3m(prices.volume, shares_outstanding),
+            "amihud_3m": compute_amihud_3m(prices.close, prices.volume),
         }
 
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -263,20 +274,45 @@ def compute_beta(
     cov = stock_returns.cov(bench_returns)
     var = bench_returns.var()
     return cov / var
+
+
+def compute_vol_3m(close: pd.Series) -> float:
+    window = close.tail(RISK_WINDOW + 1)
+    returns = window.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    if len(returns) < RISK_MIN_OBS:
+        return float("nan")
+    return float(returns.std() * TRADING_DAYS**0.5)
+
+
+def compute_turnover_3m(volume: pd.Series, shares_outstanding: float) -> float:
+    recent = volume.tail(RISK_WINDOW).dropna()
+    if len(recent) < RISK_MIN_OBS or not shares_outstanding > 0:
+        return float("nan")
+    return float(recent.mean() / shares_outstanding)
+
+
+def compute_amihud_3m(close: pd.Series, volume: pd.Series) -> float:
+    frame = pd.concat([close, volume], axis=1, keys=["c", "v"]).tail(RISK_WINDOW + 1)
+    ret = frame["c"].pct_change().abs()
+    dollar_volume = frame["c"] * frame["v"]
+    ratio = (ret / dollar_volume).where(dollar_volume > 0)
+    ratio = ratio.replace([np.inf, -np.inf], np.nan).dropna()
+    if len(ratio) < RISK_MIN_OBS:
+        return float("nan")
+    return float(ratio.mean() * 1e6)
 ```
 
 **Notes on this step:**
-- `pe_ratio`, `ev_ebitda`, and `debt_to_ebitda` are the `LOWER_IS_BETTER`
-  factors — sign-flip is applied by `agents/modeling.py` before calling
-  `compute_factor_scores`, not here.
+- `pe_ratio`, `ev_ebitda`, `debt_to_ebitda`, `vol_3m`, and `amihud_3m` are
+  the `LOWER_IS_BETTER` factors — sign-flip is applied by
+  `agents/modeling.py` before calling `compute_factor_scores`, not here.
 - `ps_ratio` is available but not included in `config/factor_weights.yaml`'s
   valuation weighting by default — if that global policy is changed to
   use it instead of/alongside `pe_ratio`/`ev_ebitda`, sign-flip it the
   same way (lower P/S is better).
-- `adv`, `market_cap`, `beta`, `hist_vol` are computed here but consumed
-  by the **Trader** agent's hard screens, not `combine_scores`, per Hard
-  Rule 9 — don't wire them into `config/factor_weights.yaml` without a
-  deliberate, reviewed global policy decision.
+- `adv`, `market_cap`, `beta`, and `hist_vol` are computed here and consumed
+  by the **Trader** agent's hard screens. `vol_3m`, `turnover_3m`, and
+  `amihud_3m` feed the scored `volatility`/`liquidity` factors.
 - Estimate-revision trend (mentioned in the original factor table) is
   intentionally omitted from this reference implementation — free-tier
   FMP/Finnhub coverage of consensus estimate revisions is thin/
@@ -294,7 +330,13 @@ import pandas as pd
 # Factors where a LOWER raw value is better — sign-flip before scoring.
 # Matches Step A's factor definitions above; add ps_ratio here too if a
 # theme's config includes it in place of/alongside pe_ratio or ev_ebitda.
-LOWER_IS_BETTER = {"pe_ratio", "ev_ebitda", "debt_to_ebitda"}
+LOWER_IS_BETTER = {
+    "pe_ratio",
+    "ev_ebitda",
+    "debt_to_ebitda",
+    "vol_3m",
+    "amihud_3m",
+}
 
 def compute_factor_scores(df: pd.DataFrame, factor_cols: list[str]) -> pd.DataFrame:
     """Cross-sectional z-score each factor within the candidate universe.

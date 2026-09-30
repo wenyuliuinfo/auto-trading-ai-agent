@@ -109,8 +109,21 @@ market symbol. The atomic unit the pipeline operates on.
 
 **Factor** — A single measurable dimension used to evaluate a ticker
 (e.g. `thematic_relevance`, `growth`, `valuation`, `momentum`,
-`sentiment`, `quality`). Each factor has a raw value and, after
+`sentiment`, `quality`, `liquidity`, `volatility`). Each factor has a raw
+value and, after
 normalization, a Z-score.
+
+**Realized volatility (`vol_3m`)** — Annualized standard deviation of
+daily simple returns over the trailing 63 trading days. Lower is scored
+as better inside the Candidate Universe.
+
+**Turnover (`turnover_3m`)** — Average daily traded volume over the
+trailing 63 days divided by estimated shares outstanding. Higher is scored
+as better.
+
+**Amihud illiquidity (`amihud_3m`)** — Average absolute daily return per
+dollar traded over the trailing 63 days, scaled by 1e6. Lower is scored as
+better.
 
 **Factor Panel** — The full set of raw and normalized Factor values for
 every ticker in a Run's Candidate Universe, as of a given date.
