@@ -30,7 +30,13 @@ SENTIMENT_MAP = {"bearish": -1.0, "neutral": 0.0, "bullish": 1.0}
 
 # Lower raw value is better; sign-flip here, before compute_factor_scores,
 # so "higher z-score = better" holds for every scored column.
-LOWER_IS_BETTER = {"pe_ratio", "ev_ebitda", "debt_to_ebitda"}
+LOWER_IS_BETTER = {
+    "pe_ratio",
+    "ev_ebitda",
+    "debt_to_ebitda",
+    "vol_3m",
+    "amihud_3m",
+}
 
 SCORING_FACTORS = [
     "thematic",
@@ -39,6 +45,8 @@ SCORING_FACTORS = [
     "valuation",
     "momentum",
     "sentiment",
+    "liquidity",
+    "volatility",
 ]
 
 MODELING_MODEL = "deepseek-v4-pro"
@@ -132,6 +140,16 @@ def _nanmean(values: list[float]) -> float:
     return float(np.mean(finite)) if finite else float("nan")
 
 
+def _z_mean(frame: pd.DataFrame, cols: list[str]) -> pd.Series:
+    """Z-score each sub-signal, then average available z-scores.
+
+    Reuses ``compute_factor_scores`` so the population-standard-deviation and
+    constant-column rules stay in one place.
+    """
+    z = compute_factor_scores(frame[cols], cols)
+    return z[[f"{col}_z" for col in cols]].mean(axis=1, skipna=True)
+
+
 def _build_scoring_frame(
     panel: pd.DataFrame, reports: list[dict[str, Any]]
 ) -> pd.DataFrame:
@@ -153,6 +171,9 @@ def _build_scoring_frame(
         pe = value("pe_ratio")
         ev_ebitda = value("ev_ebitda")
         debt = value("debt_to_ebitda")
+        vol_3m = value("vol_3m")
+        turnover_3m = value("turnover_3m")
+        amihud_3m = value("amihud_3m")
         growth_values = [value("revenue_growth_yoy"), value("eps_growth_yoy")]
         quality_values = [
             value("roe"),
@@ -175,11 +196,23 @@ def _build_scoring_frame(
                 "quality": _nanmean(quality_values),
                 "valuation": _nanmean(valuation_values),
                 "momentum": value("momentum_6m"),
+                "vol_3m": vol_3m,
+                "turnover_3m": turnover_3m,
+                "amihud_3m": amihud_3m,
                 "market_cap": value("market_cap"),
                 "adv": value("adv"),
             }
         )
-    return pd.DataFrame(rows)
+    frame = pd.DataFrame(rows)
+    frame["volatility"] = -frame["vol_3m"]
+    frame["log_turnover"] = np.log(
+        frame["turnover_3m"].where(frame["turnover_3m"] > 0)
+    )
+    frame["neg_log_amihud"] = -np.log(
+        frame["amihud_3m"].where(frame["amihud_3m"] > 0)
+    )
+    frame["liquidity"] = _z_mean(frame, ["log_turnover", "neg_log_amihud"])
+    return frame
 
 
 def _panel_from_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:

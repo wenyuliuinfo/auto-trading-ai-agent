@@ -10,7 +10,12 @@ import pytest
 
 from app.integrations.factor_panel import (
     RAW_FACTOR_COLUMNS,
+    RISK_MIN_OBS,
+    RISK_WINDOW,
     _row_for_ticker,
+    compute_amihud_3m,
+    compute_turnover_3m,
+    compute_vol_3m,
     get_factor_panel,
 )
 from app.integrations.fundamentals import Fundamentals
@@ -90,3 +95,50 @@ def test_get_factor_panel_fetches_spy_once(
 
     assert calls.count("SPY") == 1
     assert list(panel["ticker"]) == ["AAA", "BBB"]
+
+
+def test_compute_vol_3m_constant_price_is_zero() -> None:
+    close = pd.Series([100.0] * (RISK_WINDOW + 1))
+    assert compute_vol_3m(close) == 0.0
+
+
+def test_compute_vol_3m_requires_min_observations() -> None:
+    close = pd.Series([100.0 + i * 0.5 for i in range(RISK_MIN_OBS)])
+    assert math.isnan(compute_vol_3m(close))
+    enough = pd.Series([100.0 + i * 0.5 for i in range(RISK_MIN_OBS + 1)])
+    assert not math.isnan(compute_vol_3m(enough))
+
+
+def test_compute_turnover_3m_uses_last_window() -> None:
+    volume = pd.Series(range(100))
+    shares = 1_000_000.0
+    expected = float(pd.Series(range(100 - RISK_WINDOW, 100)).mean() / shares)
+    assert compute_turnover_3m(volume, shares) == pytest.approx(expected)
+
+
+def test_compute_turnover_3m_rejects_invalid_shares() -> None:
+    volume = pd.Series([1_000_000.0] * RISK_WINDOW)
+    assert math.isnan(compute_turnover_3m(volume, 0.0))
+    assert math.isnan(compute_turnover_3m(volume, float("nan")))
+
+
+def test_compute_amihud_3m_hand_computed() -> None:
+    close = pd.Series([100.0, 101.0, 100.0, 102.0, 103.0] * 20)
+    volume = pd.Series([1_000_000.0] * 100)
+    frame = pd.concat([close.tail(RISK_WINDOW + 1), volume.tail(RISK_WINDOW + 1)], axis=1)
+    ret = frame.iloc[:, 0].pct_change().abs()
+    dollar_volume = frame.iloc[:, 0] * frame.iloc[:, 1]
+    ratio = (ret / dollar_volume).where(dollar_volume > 0)
+    expected = float(ratio.dropna().mean() * 1e6)
+    assert compute_amihud_3m(close, volume) == pytest.approx(expected)
+
+
+def test_compute_amihud_3m_all_zero_volume_is_nan() -> None:
+    close = pd.Series([100.0 + i for i in range(RISK_WINDOW + 1)])
+    volume = pd.Series([0.0] * (RISK_WINDOW + 1))
+    assert math.isnan(compute_amihud_3m(close, volume))
+
+
+def test_raw_factor_columns_include_new_risk_factors() -> None:
+    for name in ["vol_3m", "turnover_3m", "amihud_3m"]:
+        assert RAW_FACTOR_COLUMNS.count(name) == 1

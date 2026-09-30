@@ -13,6 +13,7 @@ from app.agents.modeling import (
     SENTIMENT_MAP,
     _build_scoring_frame,
     _panel_from_rows,
+    _z_mean,
     combine_scores,
     compute_factor_scores,
     rank,
@@ -153,3 +154,90 @@ def test_cached_panel_with_missing_raw_value_does_not_crash() -> None:
     row = scoring.iloc[0]
     assert np.isnan(row["valuation"])
     assert np.isnan(row["market_cap"])
+
+
+def _risk_scoring_panel(
+    vol: list[float], turnover: list[float], amihud: list[float]
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "ticker": ["A", "B"],
+            "vol_3m": vol,
+            "turnover_3m": turnover,
+            "amihud_3m": amihud,
+        }
+    )
+
+
+def _risk_reports() -> list[dict[str, object]]:
+    return [
+        {
+            "ticker": "A",
+            "thematic_relevance_score": 4.0,
+            "sentiment_label": "bullish",
+        },
+        {
+            "ticker": "B",
+            "thematic_relevance_score": 4.0,
+            "sentiment_label": "bullish",
+        },
+    ]
+
+
+def test_build_scoring_frame_adds_volatility_and_liquidity() -> None:
+    frame = _build_scoring_frame(
+        _risk_scoring_panel([0.2, 0.4], [0.01, 0.02], [0.5, 0.2]),
+        _risk_reports(),
+    )
+    assert {"volatility", "liquidity"}.issubset(frame.columns)
+
+
+def test_volatility_direction_is_lower_vol_higher_score() -> None:
+    frame = _build_scoring_frame(
+        _risk_scoring_panel([0.2, 0.4], [0.01, 0.02], [0.5, 0.2]),
+        _risk_reports(),
+    )
+    scored = compute_factor_scores(frame, ["volatility"])
+    a = scored.loc[scored["ticker"] == "A", "volatility_z"].iloc[0]
+    b = scored.loc[scored["ticker"] == "B", "volatility_z"].iloc[0]
+    assert a > b
+
+
+def test_liquidity_direction_higher_turnover_higher_score() -> None:
+    frame = _build_scoring_frame(
+        _risk_scoring_panel([0.2, 0.2], [0.01, 0.02], [0.5, 0.5]),
+        _risk_reports(),
+    )
+    a = frame.loc[frame["ticker"] == "A", "liquidity"].iloc[0]
+    b = frame.loc[frame["ticker"] == "B", "liquidity"].iloc[0]
+    assert b > a
+
+
+def test_liquidity_direction_lower_amihud_higher_score() -> None:
+    frame = _build_scoring_frame(
+        _risk_scoring_panel([0.2, 0.2], [0.01, 0.01], [0.5, 0.2]),
+        _risk_reports(),
+    )
+    a = frame.loc[frame["ticker"] == "A", "liquidity"].iloc[0]
+    b = frame.loc[frame["ticker"] == "B", "liquidity"].iloc[0]
+    assert b > a
+
+
+def test_legacy_panel_without_new_columns_does_not_crash() -> None:
+    panel = pd.DataFrame({"ticker": ["A"], "momentum_6m": [0.1]})
+    frame = _build_scoring_frame(panel, _risk_reports()[:1])
+    assert "volatility" in frame.columns
+    assert "liquidity" in frame.columns
+    assert np.isnan(frame["volatility"].iloc[0])
+    assert np.isnan(frame["liquidity"].iloc[0])
+
+
+def test_z_mean_reuses_zscore_and_averages_available_sub_signals() -> None:
+    frame = pd.DataFrame(
+        {
+            "a": [1.0, 2.0, 3.0],
+            "b": [3.0, 2.0, np.nan],
+        }
+    )
+    result = _z_mean(frame, ["a", "b"])
+    assert not result.isna().any()

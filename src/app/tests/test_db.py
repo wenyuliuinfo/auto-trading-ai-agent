@@ -44,6 +44,7 @@ def test_dispose_db_resets_engine_for_next_loop(tmp_path) -> None:
 async def test_cached_factor_tickers_ignore_null_raw_rows(db: None) -> None:
     run = await create_run("00000000-0000-0000-0000-0000000000b1")
     today = date.today()
+    new_columns = ["vol_3m", "turnover_3m", "amihud_3m"]
     await save_factor_panel(
         run["run_id"],
         [
@@ -54,8 +55,35 @@ async def test_cached_factor_tickers_ignore_null_raw_rows(db: None) -> None:
                 "raw_value": None,
                 "z_score": None,
             },
+            *[
+                {
+                    "ticker": "NULLY",
+                    "as_of_date": today,
+                    "factor_name": name,
+                    "raw_value": None,
+                    "z_score": None,
+                }
+                for name in new_columns
+            ],
             {
                 "ticker": "GOOD",
+                "as_of_date": today,
+                "factor_name": "pe_ratio",
+                "raw_value": 20.0,
+                "z_score": None,
+            },
+            *[
+                {
+                    "ticker": "GOOD",
+                    "as_of_date": today,
+                    "factor_name": name,
+                    "raw_value": None,
+                    "z_score": None,
+                }
+                for name in new_columns
+            ],
+            {
+                "ticker": "LEGACY",
                 "as_of_date": today,
                 "factor_name": "pe_ratio",
                 "raw_value": 20.0,
@@ -68,6 +96,7 @@ async def test_cached_factor_tickers_ignore_null_raw_rows(db: None) -> None:
 
     assert "GOOD" in cached
     assert "NULLY" not in cached
+    assert "LEGACY" not in cached
 
 
 @pytest.mark.asyncio

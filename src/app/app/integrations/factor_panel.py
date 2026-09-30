@@ -16,6 +16,9 @@ from app.logging_conf import get_logger
 logger = get_logger(__name__)
 
 FACTOR_PANEL_MAX_WORKERS = 8
+TRADING_DAYS = 252
+RISK_WINDOW = 63
+RISK_MIN_OBS = 40
 
 RAW_FACTOR_COLUMNS = [
     "ticker",
@@ -36,6 +39,9 @@ RAW_FACTOR_COLUMNS = [
     "market_cap",
     "beta",
     "hist_vol",
+    "vol_3m",
+    "turnover_3m",
+    "amihud_3m",
 ]
 
 
@@ -83,6 +89,37 @@ def compute_beta(
         return float("nan")
 
 
+def compute_vol_3m(close: pd.Series) -> float:
+    """Annualized realized volatility over the trailing ~3-month window."""
+    window = close.tail(RISK_WINDOW + 1)
+    returns = window.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    if len(returns) < RISK_MIN_OBS:
+        return float("nan")
+    return float(returns.std() * TRADING_DAYS**0.5)
+
+
+def compute_turnover_3m(volume: pd.Series, shares_outstanding: float) -> float:
+    """Average daily traded fraction of shares outstanding over 3 months."""
+    recent = volume.tail(RISK_WINDOW).dropna()
+    if len(recent) < RISK_MIN_OBS or not shares_outstanding > 0:
+        return float("nan")
+    return float(recent.mean() / shares_outstanding)
+
+
+def compute_amihud_3m(close: pd.Series, volume: pd.Series) -> float:
+    """Amihud illiquidity scaled to 1e6; higher means less liquid."""
+    frame = pd.concat([close, volume], axis=1, keys=["c", "v"]).tail(
+        RISK_WINDOW + 1
+    )
+    ret = frame["c"].pct_change().abs()
+    dollar_volume = frame["c"] * frame["v"]
+    ratio = (ret / dollar_volume).where(dollar_volume > 0)
+    ratio = ratio.replace([np.inf, -np.inf], np.nan).dropna()
+    if len(ratio) < RISK_MIN_OBS:
+        return float("nan")
+    return float(ratio.mean() * 1e6)
+
+
 def _row_for_ticker(
     ticker: str, benchmark_history: PriceHistory | None = None
 ) -> dict[str, Any]:
@@ -93,6 +130,13 @@ def _row_for_ticker(
     market_cap = (
         fundamentals.market_cap
         if fundamentals.market_cap is not None
+        else float("nan")
+    )
+    shares_outstanding_est = (
+        fundamentals.market_cap / fundamentals.price
+        if fundamentals.market_cap is not None
+        and fundamentals.price is not None
+        and fundamentals.price > 0
         else float("nan")
     )
     total_debt = (
@@ -124,6 +168,9 @@ def _row_for_ticker(
     )
     adv = float((volume.tail(20) * close.tail(20)).mean()) if len(volume) > 0 else float("nan")
     hist_vol = float(close.pct_change().std() * (252**0.5)) if len(close) > 1 else float("nan")
+    vol_3m = compute_vol_3m(close)
+    turnover_3m = compute_turnover_3m(volume, shares_outstanding_est)
+    amihud_3m = compute_amihud_3m(close, volume)
     return {
         "ticker": ticker,
         "pe_ratio": pe,
@@ -147,6 +194,9 @@ def _row_for_ticker(
         "market_cap": market_cap,
         "beta": compute_beta(close, benchmark_history=benchmark_history),
         "hist_vol": hist_vol,
+        "vol_3m": vol_3m,
+        "turnover_3m": turnover_3m,
+        "amihud_3m": amihud_3m,
     }
 
 

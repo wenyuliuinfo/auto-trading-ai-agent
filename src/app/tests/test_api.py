@@ -31,6 +31,16 @@ def test_theme_create_and_trigger_run_end_to_end(client) -> None:
     theme = created.json()
     assert "factor_weights" in theme["config"]
     assert abs(sum(theme["config"]["factor_weights"].values()) - 1.0) < 1e-9
+    assert set(theme["config"]["factor_weights"]) == {
+        "thematic_z",
+        "growth_z",
+        "quality_z",
+        "valuation_z",
+        "momentum_z",
+        "sentiment_z",
+        "liquidity_z",
+        "volatility_z",
+    }
 
     triggered = client.post(f"/themes/{theme['theme_id']}/runs")
     assert triggered.status_code == 202, triggered.text

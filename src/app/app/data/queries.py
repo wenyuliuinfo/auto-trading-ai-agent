@@ -365,20 +365,26 @@ async def get_factor_panel_rows(run_id: str) -> list[JSONDict]:
 
 
 async def get_cached_factor_tickers(as_of_date: date) -> list[str]:
-    """Tickers with a complete raw factor row fetched today (Hard Rule 10).
-
-    A ticker only counts as cached when the raw ``pe_ratio`` row exists and
-    has a non-null value; all-null rows from a failed fetch must be retried.
-    """
+    """Tickers with a complete, current-version factor panel for today."""
+    required_new_columns = {"vol_3m", "turnover_3m", "amihud_3m"}
     async with get_session() as session:
-        result = await session.execute(
-            select(FactorPanel.ticker)
-            .where(FactorPanel.as_of_date == as_of_date)
-            .where(FactorPanel.factor_name == "pe_ratio")
+        base = select(FactorPanel.ticker).where(
+            FactorPanel.as_of_date == as_of_date
+        )
+        pe_result = await session.execute(
+            base.where(FactorPanel.factor_name == "pe_ratio")
             .where(FactorPanel.raw_value.is_not(None))
             .distinct()
         )
-        return [str(t) for t in result.scalars().all()]
+        candidates = {str(ticker) for ticker in pe_result.scalars().all()}
+        for factor_name in required_new_columns:
+            if not candidates:
+                break
+            result = await session.execute(
+                base.where(FactorPanel.factor_name == factor_name).distinct()
+            )
+            candidates &= {str(ticker) for ticker in result.scalars().all()}
+        return list(candidates)
 
 
 async def get_factor_panel_for_tickers(
