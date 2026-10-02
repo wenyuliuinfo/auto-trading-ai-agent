@@ -143,11 +143,33 @@ CREATE TABLE reports (
     report_doc_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id          UUID REFERENCES runs(run_id) ON DELETE CASCADE UNIQUE,
     report_md       TEXT NOT NULL,
+    report_data     JSONB,
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX idx_reports_run_id     ON reports(run_id);
 CREATE INDEX idx_reports_created_at ON reports(created_at);
+
+-- ------------------------------------------------------------
+-- 9b. run_klines — immutable per-run K-line snapshots
+-- ------------------------------------------------------------
+CREATE TABLE run_klines (
+    run_id          UUID REFERENCES runs(run_id) ON DELETE CASCADE,
+    ticker          TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    source          TEXT NOT NULL,
+    sdk_version     TEXT,
+    adjust          TEXT NOT NULL,
+    period          TEXT NOT NULL DEFAULT 'daily',
+    as_of           DATE,
+    fetched_at      TIMESTAMPTZ DEFAULT now(),
+    bars            JSONB,
+    flags           JSONB,
+    error_code      TEXT,
+    PRIMARY KEY (run_id, ticker)
+);
+
+CREATE INDEX idx_run_klines_run_id ON run_klines(run_id);
 
 -- ------------------------------------------------------------
 -- 9. basket_performance

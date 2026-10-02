@@ -88,6 +88,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       LANGFUSE_HOST: http://langfuse:3000
       PINECONE_HOST_URL: http://pinecone-local:5080
+      KLINE_ENABLED: ${KLINE_ENABLED:-true}
+      KLINE_NODE_BIN: node
+      KLINE_SCRIPT_PATH: /app/tools/stock-sdk-kline/fetch_klines.mjs
+      KLINE_TIMEOUT_S: ${KLINE_TIMEOUT_S:-60}
     ports:
       - "8000:8000"
     depends_on:
@@ -114,6 +118,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       LANGFUSE_HOST: http://langfuse:3000
       PINECONE_HOST_URL: http://pinecone-local:5080
+      KLINE_ENABLED: ${KLINE_ENABLED:-true}
+      KLINE_NODE_BIN: node
+      KLINE_SCRIPT_PATH: /app/tools/stock-sdk-kline/fetch_klines.mjs
+      KLINE_TIMEOUT_S: ${KLINE_TIMEOUT_S:-60}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
