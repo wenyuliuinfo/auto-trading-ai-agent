@@ -1,0 +1,1 @@
+"""Pure report rendering helpers."""

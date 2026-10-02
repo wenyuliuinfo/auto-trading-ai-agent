@@ -144,7 +144,13 @@ export function RunMonitor({ runId, initialStatus }: RunMonitorProps) {
         </div>
       ) : null}
       {tab === "rankings" && rankings ? <RankingsTable rankings={rankings} /> : null}
-      {tab === "report" && report ? <ReportView markdown={report.report_md} /> : null}
+      {tab === "report" && report ? (
+        <ReportView
+          markdown={report.report_md}
+          runId={runId}
+          reportData={report.report_data}
+        />
+      ) : null}
       {status.status === "complete" && !basket && !error ? (
         <div className="loading-text">Loading results...</div>
       ) : null}

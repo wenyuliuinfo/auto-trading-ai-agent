@@ -21,7 +21,7 @@ describe("ReportView", () => {
       "---",
       "*This report is for research purposes only and does not constitute investment advice.*",
     ].join("\n");
-    render(<ReportView markdown={markdown} />);
+    render(<ReportView markdown={markdown} runId="run-1" />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Grid modernization");
     expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent("1. Theme Thesis");
     expect(screen.getByRole("heading", { level: 4 })).toHaveTextContent("INCY - Incyte Corporation");

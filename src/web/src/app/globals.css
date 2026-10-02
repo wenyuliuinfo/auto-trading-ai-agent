@@ -1132,6 +1132,285 @@ select.field option {
   color: var(--foreground-muted);
 }
 
+.structured-report .report-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.report-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.8rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+}
+
+.summary-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--foreground-muted);
+}
+
+.allocation-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.allocation-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.allocation-segment {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.report-section-title {
+  font-size: 1rem;
+  margin: 1.1rem 0 0.5rem;
+}
+
+.report-thesis-panel {
+  padding: 1rem;
+  border-left: 3px solid var(--accent);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  margin: 0.5rem 0 1rem;
+}
+
+.report-thesis-panel .report-section-title {
+  margin-top: 0;
+}
+
+.thesis-body {
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.holdings-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+}
+
+.holdings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.holdings-table th {
+  text-align: left;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  color: var(--foreground-muted);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.6rem 0.7rem;
+}
+
+.holdings-table td {
+  padding: 0.7rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  vertical-align: top;
+}
+
+.holdings-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ticker {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.company-name {
+  color: var(--foreground-muted);
+  font-size: 0.78rem;
+}
+
+.return-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.return-up {
+  color: var(--success);
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.return-down {
+  color: var(--danger);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.return-neutral {
+  color: var(--foreground-muted);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.news-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-width: 240px;
+}
+
+.news-source {
+  font-size: 0.72rem;
+}
+
+.kline-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+
+.kline-mini img {
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.kline-open {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.kline-open:focus-visible {
+  outline: 2px solid rgba(94, 106, 210, 0.7);
+  outline-offset: 2px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.modal-panel {
+  width: min(820px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: #0b0f14;
+  box-shadow: 0 16px 80px rgba(0, 0, 0, 0.6);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.modal-body {
+  padding: 1rem;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.kline-full-svg {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.kline-full-svg svg {
+  display: block;
+  max-width: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  color: var(--foreground-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
+}
+
+.chip-warning {
+  color: var(--warning);
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+
+.caveat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--warning);
+  font-size: 0.72rem;
+  margin-top: 0.3rem;
+}
+
+.why-cell {
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+.report-disclaimer {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-default);
+  color: var(--foreground-muted);
+  font-size: 0.82rem;
+}
+
+.small {
+  font-size: 0.76rem;
+}
+
+.muted {
+  color: var(--foreground-muted);
+}
+
 /* Layout grids */
 
 .workspace-grid {
@@ -1170,6 +1449,54 @@ select.field option {
 
   .theme-head {
     flex-direction: column;
+  }
+
+  .structured-report .report-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media print {
+  .nav,
+  .report-toolbar,
+  .segmented,
+  .icon-button,
+  .modal-backdrop {
+    display: none !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body {
+    background: var(--background-base);
+    color: var(--foreground);
+  }
+
+  .structured-report .report-summary-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .holdings-table-wrap {
+    border: 1px solid var(--border-default);
+  }
+
+  .holdings-table th,
+  .holdings-table td {
+    color: var(--foreground);
+    border-color: rgba(255, 255, 255, 0.05);
+    break-inside: avoid;
+  }
+
+  .why-cell {
+    max-width: none;
+  }
+
+  .kline-mini img {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }
 

@@ -57,6 +57,79 @@ export interface ReportResponse {
   run_id: string;
   report_md: string;
   disclaimer: string;
+  report_data: ReportData | null;
+}
+
+export interface ReportNews {
+  headline: string;
+  source: string;
+  url: string | null;
+  published_at: string | null;
+}
+
+export interface ReportKline {
+  status: "ok" | "insufficient" | "unavailable";
+  as_of: string | null;
+  flags: string[];
+  mini_url: string | null;
+  error_code: string | null;
+}
+
+export interface ReportHolding {
+  ticker: string;
+  company_name: string;
+  weight: number;
+  rank: number | null;
+  sub_exposure: string | null;
+  composite_score: number | null;
+  return_6m: number | null;
+  return_6m_source: "kline_snapshot" | "factor_panel" | null;
+  news: ReportNews;
+  kline: ReportKline;
+  why_included: string;
+  factor_contributions: Record<string, number | null>;
+  caveats: string[];
+}
+
+export interface ReportSummary {
+  holdings_count: number;
+  weighted_return_6m: number | null;
+  return_coverage: number;
+  top3_weight: number;
+  allocation_by_sub_exposure: { name: string; weight: number }[];
+  data_as_of: { earliest: string | null; latest: string | null };
+}
+
+export interface ReportData {
+  schema_version: number;
+  disclaimer: string;
+  narrative_fallback: boolean;
+  summary: ReportSummary;
+  thesis: string;
+  holdings: ReportHolding[];
+  excluded: { ticker: string; company_name: string; reason: string }[];
+  risk_summary: string;
+}
+
+export interface KlineBar {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface KlineResponse {
+  ticker: string;
+  status: "ok" | "insufficient" | "unavailable";
+  source: string;
+  sdk_version: string | null;
+  adjust: string;
+  as_of: string | null;
+  flags: string[];
+  error_code: string | null;
+  bars: KlineBar[];
 }
 
 export interface ThemeCreateRequest {
@@ -101,4 +174,6 @@ export const api = {
   getRankings: (runId: string) =>
     request<RankingRow[]>(`/runs/${runId}/rankings`),
   getReport: (runId: string) => request<ReportResponse>(`/runs/${runId}/report`),
+  getKline: (runId: string, ticker: string) =>
+    request<KlineResponse>(`/runs/${runId}/klines/${ticker}`),
 };

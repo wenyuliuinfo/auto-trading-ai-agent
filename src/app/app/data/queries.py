@@ -23,6 +23,7 @@ from app.data.models import (
     Ranking,
     Report,
     Run,
+    RunKline,
     Theme,
 )
 
@@ -503,9 +504,17 @@ async def get_basket_with_scores(run_id: str) -> list[JSONDict]:
 # --- Report ---------------------------------------------------------------------
 
 
-async def save_report(run_id: str, report_md: str) -> None:
+async def save_report(
+    run_id: str, report_md: str, report_data: JSONDict | None = None
+) -> None:
     async with get_session() as session:
-        session.add(Report(run_id=_u(run_id), report_md=report_md))
+        session.add(
+            Report(
+                run_id=_u(run_id),
+                report_md=report_md,
+                report_data=report_data,
+            )
+        )
         await session.commit()
 
 
@@ -515,6 +524,75 @@ async def get_report(run_id: str) -> str | None:
             select(Report.report_md).where(Report.run_id == _u(run_id))
         )
         return result.scalar_one_or_none()
+
+
+async def get_report_record(run_id: str) -> JSONDict | None:
+    async with get_session() as session:
+        result = await session.execute(
+            select(Report).where(Report.run_id == _u(run_id))
+        )
+        row = result.scalars().first()
+        if row is None:
+            return None
+        return {"report_md": row.report_md, "report_data": row.report_data}
+
+
+# --- K-line snapshots -------------------------------------------------------------
+
+
+async def save_klines(
+    run_id: str, snapshots: list[JSONDict]
+) -> None:
+    def _as_date(value: Any) -> date | None:
+        if value is None:
+            return None
+        if isinstance(value, date):
+            return value
+        try:
+            return date.fromisoformat(str(value)[:10])
+        except ValueError:
+            return None
+
+    async with get_session() as session:
+        for snapshot in snapshots:
+            ticker = snapshot["ticker"]
+            row = await session.get(RunKline, (_u(run_id), ticker))
+            if row is None:
+                row = RunKline(run_id=_u(run_id), ticker=ticker)
+                session.add(row)
+            row.status = snapshot["status"]
+            row.source = snapshot["source"]
+            row.sdk_version = snapshot.get("sdk_version")
+            row.adjust = snapshot["adjust"]
+            row.period = "daily"
+            row.as_of = _as_date(snapshot.get("as_of"))
+            row.bars = snapshot.get("bars") or None
+            row.flags = snapshot.get("flags") or []
+            row.error_code = snapshot.get("error_code")
+        await session.commit()
+
+
+async def get_klines(run_id: str) -> list[JSONDict]:
+    async with get_session() as session:
+        result = await session.execute(
+            select(RunKline).where(RunKline.run_id == _u(run_id))
+        )
+        return [
+            {
+                "ticker": row.ticker,
+                "status": row.status,
+                "source": row.source,
+                "sdk_version": row.sdk_version,
+                "adjust": row.adjust,
+                "period": row.period,
+                "as_of": row.as_of.isoformat() if row.as_of else None,
+                "fetched_at": row.fetched_at,
+                "bars": row.bars or [],
+                "flags": row.flags or [],
+                "error_code": row.error_code,
+            }
+            for row in result.scalars().all()
+        ]
 
 
 # --- Operations/evaluation support -------------------------------------------------

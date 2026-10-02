@@ -14,6 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
 from app.agents.analyst import analyst_node
+from app.agents.kline_snapshot import kline_snapshot_node
 from app.agents.modeling import modeling_node
 from app.agents.report import report_node
 from app.agents.screener import screener_node
@@ -74,6 +75,7 @@ def build_graph(checkpointer: Any | None = None) -> Any:
     graph.add_node("screener", screener_node)
     graph.add_node("analyst_node", analyst_node)
     graph.add_node("modeling", modeling_node)
+    graph.add_node("kline_snapshot", kline_snapshot_node)
     graph.add_node("validator", validator_node)
     graph.add_node("trader", trader_node)
     graph.add_node("report", report_node)
@@ -86,8 +88,9 @@ def build_graph(checkpointer: Any | None = None) -> Any:
     graph.add_conditional_edges(
         "trader",
         check_basket_complete,
-        {"screener_retry": "screener", "report": "report"},
+        {"screener_retry": "screener", "report": "kline_snapshot"},
     )
+    graph.add_edge("kline_snapshot", "report")
     graph.add_edge("report", END)
     return graph.compile(checkpointer=checkpointer)
 

@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     # seed file.
     reference_universe_url: str = ""
 
+    # K-line snapshot bridge (stock-sdk). The Node bridge is optional at
+    # runtime: disabled/failed snapshots degrade to "Chart unavailable".
+    kline_enabled: bool = True
+    kline_node_bin: str = "node"
+    kline_script_path: str = ""
+    kline_timeout_s: int = 60
+
     # API-layer rate limit for run triggers (ARCHITECTURE.md §9).
     rate_limit_runs_per_minute: int = 5
 

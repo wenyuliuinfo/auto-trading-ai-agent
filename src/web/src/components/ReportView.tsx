@@ -1,7 +1,11 @@
 import { ReactNode } from "react";
+import { ReportData } from "@/lib/api";
+import { StructuredReport } from "./StructuredReport";
 
 interface ReportViewProps {
   markdown: string;
+  runId: string;
+  reportData?: ReportData | null;
 }
 
 function escapeHtml(text: string): string {
@@ -39,7 +43,10 @@ function renderInline(text: string): ReactNode[] {
   });
 }
 
-export function ReportView({ markdown }: ReportViewProps) {
+export function ReportView({ markdown, runId, reportData }: ReportViewProps) {
+  if (reportData) {
+    return <StructuredReport data={reportData} markdown={markdown} runId={runId} />;
+  }
   const lines = markdown.split("\n");
   const nodes: ReactNode[] = [];
   let paragraph: string[] = [];

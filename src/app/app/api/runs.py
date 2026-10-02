@@ -7,21 +7,24 @@ import json
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from app.api.deps import enforce_run_rate_limit
 from app.data.queries import (
     count_analyst_reports,
     get_basket_with_scores,
     get_candidates,
+    get_klines,
     get_rankings,
-    get_report,
+    get_report_record,
     get_run,
     get_theme,
     update_run_status,
 )
+from app.reports.svg import render_kline_svg
 from app.schemas import (
     BasketHolding,
+    KlineResponse,
     RankingRow,
     ReportResponse,
     RunResponse,
@@ -103,13 +106,44 @@ async def get_report_endpoint(run_id: str) -> ReportResponse:
     run = await get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
-    report_md = await get_report(run_id)
-    if report_md is None:
+    report = await get_report_record(run_id)
+    if report is None:
         raise HTTPException(status_code=404, detail="report not ready")
     return ReportResponse(
         run_id=run_id,
-        report_md=report_md,
+        report_md=report["report_md"],
         disclaimer="not investment advice, for research purposes only",
+        report_data=report.get("report_data"),
+    )
+
+
+@router.get("/runs/{run_id}/klines/{ticker}", response_model=KlineResponse)
+async def get_kline_endpoint(run_id: str, ticker: str) -> KlineResponse:
+    run = await get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    rows = {row["ticker"]: row for row in await get_klines(run_id)}
+    if ticker not in rows:
+        raise HTTPException(status_code=404, detail="kline not found")
+    return KlineResponse.model_validate(rows[ticker])
+
+
+@router.get("/runs/{run_id}/klines/{ticker}/mini.svg")
+async def get_kline_mini_svg(run_id: str, ticker: str) -> Response:
+    run = await get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    rows = {row["ticker"]: row for row in await get_klines(run_id)}
+    row = rows.get(ticker)
+    if row is None or row["status"] != "ok":
+        raise HTTPException(status_code=404, detail="kline not available")
+    svg = render_kline_svg(row["bars"])
+    if not svg:
+        raise HTTPException(status_code=404, detail="kline not available")
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
     )
 
 

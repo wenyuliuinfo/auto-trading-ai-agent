@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -69,6 +70,10 @@ async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if not engine.url.drivername.startswith("sqlite"):
+            await conn.execute(
+                text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_data JSONB")
+            )
 
 
 async def dispose_db() -> None:

@@ -162,9 +162,36 @@ class Report(Base):
         unique=True,
     )
     report_md: Mapped[str] = mapped_column(Text, nullable=False)
+    report_data: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class RunKline(Base):
+    __tablename__ = "run_klines"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("runs.run_id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    )
+    ticker: Mapped[str] = mapped_column(String(16), primary_key=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    sdk_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    adjust: Mapped[str] = mapped_column(String(16), nullable=False)
+    period: Mapped[str] = mapped_column(String(16), default="daily", nullable=False)
+    as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    bars: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON_TYPE, nullable=True)
+    flags: Mapped[list[str] | None] = mapped_column(JSON_TYPE, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(48), nullable=True)
 
 
 class BasketPerformance(Base):

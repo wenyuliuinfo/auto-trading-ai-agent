@@ -87,6 +87,19 @@ class ReportResponse(BaseModel):
     run_id: str
     report_md: str
     disclaimer: str
+    report_data: dict[str, Any] | None = None
+
+
+class KlineResponse(BaseModel):
+    ticker: str
+    status: Literal["ok", "insufficient", "unavailable"]
+    source: str
+    sdk_version: str | None = None
+    adjust: str
+    as_of: str | None = None
+    flags: list[str] = Field(default_factory=list)
+    error_code: str | None = None
+    bars: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RunTriggerResponse(BaseModel):

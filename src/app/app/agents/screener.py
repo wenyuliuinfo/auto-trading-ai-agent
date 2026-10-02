@@ -72,13 +72,16 @@ SCREENER_TOOLS = [
 
 
 def enrich_with_market_cap(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Fill missing market caps from the reference universe when available."""
+    """Fill missing market caps, names, and industries from the universe."""
     by_ticker = {row["ticker"]: row for row in search_sector("")}
     for candidate in candidates:
-        if candidate.get("market_cap") is None:
-            row = by_ticker.get(candidate["ticker"])
-            if row is not None:
-                candidate["market_cap"] = row.get("market_cap")
+        row = by_ticker.get(candidate["ticker"])
+        if row is not None and not candidate.get("company_name"):
+            candidate["company_name"] = row.get("company_name")
+        if row is not None and not candidate.get("gics_subindustry"):
+            candidate["gics_subindustry"] = row.get("gics_subindustry")
+        if candidate.get("market_cap") is None and row is not None:
+            candidate["market_cap"] = row.get("market_cap")
     return candidates
 
 
