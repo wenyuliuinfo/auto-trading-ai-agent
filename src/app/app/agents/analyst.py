@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -83,6 +84,24 @@ def _normalize_sentiment_label(report: dict[str, Any]) -> dict[str, Any]:
     if label in SENTIMENT_LABEL_ALIASES:
         report["sentiment_label"] = SENTIMENT_LABEL_ALIASES[label]
     return report
+
+
+def _coerce_revenue_pct(value: Any) -> float | None:
+    """Accept numeric fractions or ``~85%``-style LLM text as a fraction."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    text = str(value).strip()
+    percent = re.search(r"(-?\d+(?:\.\d+)?)\s*%", text)
+    if percent:
+        return float(percent.group(1)) / 100.0
+    number = re.search(r"(-?\d+(?:\.\d+)?)", text)
+    if number:
+        return float(number.group(1))
+    return None
 
 
 def _stub_report(
@@ -196,6 +215,9 @@ async def analyst_node(state: dict[str, Any]) -> dict[str, Any]:
                 report_data["revenue_pct_theme_estimate"] = pct_estimate
 
         report_data = _normalize_sentiment_label(report_data)
+        report_data["revenue_pct_theme_estimate"] = _coerce_revenue_pct(
+            report_data.get("revenue_pct_theme_estimate")
+        )
         report = AnalystReport.model_validate(report_data)
         await save_analyst_report(run_id, report.model_dump())
         return {"analyst_reports": [report.model_dump()]}
