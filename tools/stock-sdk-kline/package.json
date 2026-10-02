@@ -1,0 +1,9 @@
+{
+  "name": "@auto-trading-ai-agent/stock-sdk-kline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "stock-sdk": "^2.4.5"
+  }
+}
