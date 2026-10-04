@@ -70,7 +70,7 @@ disclaimer.
 
 The following is the Live Auto Trading AI Agent screen capture.
 <p align="center">
-  <img src="docs/images/auto-trading-agent-homepage.png" alt="Auto Trading Homepage" width="900">
+  <img src="docs/images/auto-trading-agent-homepage-v3.0.png" alt="Auto Trading Homepage" width="900">
 </p>
 
 <p align="center">
@@ -78,8 +78,31 @@ The following is the Live Auto Trading AI Agent screen capture.
 </p>
 
 <p align="center">
-  <img src="docs/images/auto-trading-agent-report.png" alt="Auto Trading Report page" width="900">
+  <img src="docs/images/auto-trading-agent-report-v3.0.png" alt="Auto Trading Report page" width="900">
 </p>
+
+## Updates (v2.2 → v3.0)
+
+- **Modeling factors** — added `volatility` and `liquidity` to the
+  deterministic composite score. New raw factors are `vol_3m`,
+  `turnover_3m`, and `amihud_3m`; factor weights were rebalanced from 6
+  keys to 8 keys while preserving legacy theme snapshots.
+- **Six-month K-line snapshots** — added a Node `stock-sdk` bridge,
+  immutable `run_klines` persistence, and K-line API endpoints. Each
+  basket holding now shows a mini candlestick chart and opens a full
+  chart with labeled price/time axes.
+- **Structured report UI** — replaced the markdown-only report view with a
+  structured holdings table, summary cards, allocation bar, return pills,
+  news links, caveat badges, and a responsive/print layout.
+- **Report generation** — added LLM-generated theme explanation and
+  one-sentence risk summary, theme name in the report header, company
+  names sourced from the Candidate table, and Markdown/PDF export actions.
+- **Analyst robustness** — normalized LLM revenue-percentage strings such
+  as `"~100% (high confidence)"` into numeric fractions before Pydantic
+  validation.
+- **Infrastructure** — backend image now includes Node and the K-line
+  bridge; database startup adds `reports.report_data` and creates
+  `run_klines`; new K-line environment variables were added.
 
 ## Tech Stack
 
