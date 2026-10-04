@@ -102,6 +102,7 @@ export interface ReportSummary {
 
 export interface ReportData {
   schema_version: number;
+  theme_name: string;
   disclaimer: string;
   narrative_fallback: boolean;
   summary: ReportSummary;

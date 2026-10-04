@@ -1139,6 +1139,12 @@ select.field option {
   margin-bottom: 1rem;
 }
 
+.report-page-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.6rem;
+  line-height: 1.2;
+}
+
 .report-toolbar {
   display: flex;
   justify-content: flex-end;

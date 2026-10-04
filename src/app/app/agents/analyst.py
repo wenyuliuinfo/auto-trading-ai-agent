@@ -209,7 +209,7 @@ async def analyst_node(state: dict[str, Any]) -> dict[str, Any]:
                         "business": business,
                     },
                 },
-                response_schema=AnalystReport,
+                response_schema=None,
             )
             if method == "disclosed" and pct_estimate is not None:
                 report_data["revenue_pct_theme_estimate"] = pct_estimate

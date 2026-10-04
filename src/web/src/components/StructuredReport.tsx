@@ -123,6 +123,7 @@ export function StructuredReport({
 
   return (
     <div className="structured-report">
+      <h1 className="report-page-title">{data.theme_name}</h1>
       <div className="report-toolbar">
         <button className="btn" onClick={() => downloadMarkdown(markdown)}>
           <Download size={15} aria-hidden />

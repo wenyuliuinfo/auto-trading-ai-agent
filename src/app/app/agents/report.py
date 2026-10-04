@@ -26,8 +26,13 @@ REPORT_TEMPERATURE = 0.5
 THEME_EXPLANATION_PROMPT = """You are an investment-thesis writer. Given a theme name and
 definition, explain what the theme is, why it matters as an investment
 theme, and the broad structural drivers, demand tailwinds, and risks that
-define it. Write 3-5 clear sentences. Do not mention specific tickers or
+define it. Write 2-3 clear sentences. Do not mention specific tickers or
 portfolio weights, and do not give investment advice."""
+
+RISK_SUMMARY_PROMPT = """You are a portfolio risk writer. Given a list of shared
+risk themes, write exactly one concise sentence describing the primary
+basket-level risk. Do not invent risks and do not mention specific tickers
+unless a risk was explicitly shared by those tickers."""
 
 REPORT_SYSTEM_PROMPT = """You are an Investment Rationale Writer. You will receive the full audit
 trail: theme definition, Analyst reports, Modeling Agent factor
@@ -84,6 +89,10 @@ def _stub_theme_explanation(theme: str, theme_definition: str) -> str:
     ).strip()
 
 
+def _stub_risk_summary(clusters: list[dict[str, Any]]) -> str:
+    return _risk_summary_text(clusters)
+
+
 async def _generate_theme_explanation(
     theme: str, theme_definition: str
 ) -> str:
@@ -95,6 +104,19 @@ async def _generate_theme_explanation(
         temperature=0.4,
         system=THEME_EXPLANATION_PROMPT,
         input_data={"theme": theme, "definition": theme_definition},
+    )
+    return result.strip()
+
+
+async def _generate_risk_summary(clusters: list[dict[str, Any]]) -> str:
+    from app.integrations.deepseek_client import DeepSeekClient
+
+    client = DeepSeekClient()
+    result = await client.complete_text(
+        model=REPORT_MODEL,
+        temperature=0.3,
+        system=RISK_SUMMARY_PROMPT,
+        input_data={"risk_clusters": clusters},
     )
     return result.strip()
 
@@ -391,6 +413,7 @@ def _build_report_data(context: dict[str, Any], run_id: str) -> dict[str, Any]:
     as_ofs = [k["as_of"] for k in [h["kline"] for h in holdings] if k.get("as_of")]
     return {
         "schema_version": 1,
+        "theme_name": context.get("theme"),
         "disclaimer": DISCLAIMER_TEXT,
         "narrative_fallback": True,
         "summary": {
@@ -425,7 +448,8 @@ def _build_report_data(context: dict[str, Any], run_id: str) -> dict[str, Any]:
             }
             for n in context.get("near_misses", [])[:3]
         ],
-        "risk_summary": _risk_summary_text(context.get("risk_clusters", [])),
+        "risk_summary": context.get("risk_summary")
+        or _risk_summary_text(context.get("risk_clusters", [])),
     }
 
 
@@ -533,6 +557,9 @@ async def report_node(state: dict[str, Any]) -> dict[str, Any]:
         context["theme_explanation"] = _stub_theme_explanation(
             theme_name, theme_definition
         )
+        context["risk_summary"] = _stub_risk_summary(
+            context.get("risk_clusters", [])
+        )
     else:
         try:
             context["theme_explanation"] = await _generate_theme_explanation(
@@ -542,6 +569,15 @@ async def report_node(state: dict[str, Any]) -> dict[str, Any]:
             logger.warning("theme_explanation_llm_failed", error=str(exc))
             context["theme_explanation"] = _stub_theme_explanation(
                 theme_name, theme_definition
+            )
+        try:
+            context["risk_summary"] = await _generate_risk_summary(
+                context.get("risk_clusters", [])
+            )
+        except Exception as exc:
+            logger.warning("risk_summary_llm_failed", error=str(exc))
+            context["risk_summary"] = _stub_risk_summary(
+                context.get("risk_clusters", [])
             )
     if stubbing_enabled():
         raw_report = _stub_report(context)

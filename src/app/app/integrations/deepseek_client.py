@@ -39,7 +39,7 @@ class DeepSeekClient:
         temperature: float,
         system: str,
         input_data: dict[str, Any],
-        response_schema: type[BaseModel],
+        response_schema: type[BaseModel] | None = None,
     ) -> dict[str, Any]:
         """One chat completion returning JSON validated against ``response_schema``."""
         content = await self._chat(
@@ -53,10 +53,14 @@ class DeepSeekClient:
             parsed = json.loads(content)
         except json.JSONDecodeError as exc:
             raise DeepSeekClientError("LLM returned invalid JSON") from exc
-        try:
-            return response_schema.model_validate(parsed).model_dump()
-        except ValidationError as exc:
-            raise DeepSeekClientError(f"LLM output failed schema validation: {exc}") from exc
+        if response_schema is not None:
+            try:
+                return response_schema.model_validate(parsed).model_dump()
+            except ValidationError as exc:
+                raise DeepSeekClientError(
+                    f"LLM output failed schema validation: {exc}"
+                ) from exc
+        return cast(dict[str, Any], parsed)
 
     async def complete_text(
         self,
