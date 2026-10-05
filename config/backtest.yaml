@@ -1,0 +1,126 @@
+# config/backtest.yaml
+#
+# The SOLE source of truth for backtest parameters. NEVER accepted as
+# user/API input: the only request field is `mode` (trailing | full).
+# Changing backtest policy means editing this file and shipping a change,
+# the same as config/factor_weights.yaml and config/sub_exposure_etf_map.yaml.
+#
+# Read exactly once at the start of each backtest job by agents/backtest.py.
+# The parsed values and their SHA-256 hash are stored with the result
+# (backtest_runs.config_json / config_hash), so a finished backtest stays
+# reproducible even if this file is edited later. Factor weights, screens,
+# and weighting scheme are NOT here: they come from the run's persisted
+# theme_config (MODELING_SKILL.md Hard Rule 2; BACKTEST_SKILL.md Rule 4).
+#
+# Any change to a rule documented in tasks/task4/METHODOLOGY.md must bump
+# `methodology_version`.
+#
+# Values marked "VERIFY" depend on your FMP plan or live-code behavior and
+# should be confirmed in PLAN Step 0.
+
+methodology_version: 1
+
+# Master switches
+enabled: true
+auto_trigger_trailing: false   # set true after staging review (PLAN Step 13)
+                               # `full` mode is never automatic (SPEC D1)
+selection_mode: full           # trailing | full; used when the caller does not
+                               # explicitly pass a mode query parameter
+
+# --- Schedule ---------------------------------------------------------------
+schedule:
+  rebalance_months: [1, 4, 7, 10]      # first trading day of each month listed
+  signal_lag_trading_days: 1           # signal date = last trading day before rebalance
+  execution_price: close               # rebalance-date close (SPEC D4)
+
+modes:
+  trailing:
+    completed_periods: 4               # most recent completed holding periods
+    include_in_progress_period: true
+    min_partial_hold_days: 10          # trading days before an in-progress period counts
+  full:
+    start: 2021-01-01                  # first rebalance = first trading day on/after
+    end: 2025-12-31                    # final period is truncated here if needed
+    data_buffer_years: 2               # fetch history this long before the first signal
+                                       # (factor panel uses 504-day lookbacks and YoY growth)
+
+# --- Capital and trading ----------------------------------------------------
+capital:
+  initial_cash: 10000
+  fractional_shares: true
+  transaction_cost_bps_per_side: 10    # on traded value |delta|; commissions + spread + slippage
+  cash_yield_annual: 0.0
+  delisting_policy: last_price_then_cash   # SPEC D5
+  max_price_gap_days: 5                # no forward-fill beyond this many calendar days
+
+# --- Benchmarks -------------------------------------------------------------
+benchmarks:
+  primary: QQQ                         # Nasdaq-100 fund, total return
+  enabled: [QQQ, SPY, theme_etfs_equal_weight, universe_equal_weight]
+  apply_entry_cost: true               # same one-time entry cost as the strategy
+
+# --- Substitute signals (replace the LLM-derived factors) -------------------
+signals:
+  thematic:
+    method: etf_breadth                # count of mapped ETFs holding the stock
+    etf_snapshot_max_age_days: 100     # ignore snapshots older than this at the signal date
+    etf_holdings_lag_days: 0           # use 60 for N-PORT based fallback data (SPEC D6)
+  sentiment:
+    method: money_flow_ratio           # CLV-weighted volume (SPEC D8)
+    window_trading_days: 126
+    money_flow_min_obs: 100
+
+# --- Universe and basket ----------------------------------------------------
+universe:
+  include_sector_keyword_hits: false   # cannot be reconstructed point-in-time
+  max_widen_retries: 2                 # mirror live graph's check_basket_complete (VERIFY)
+  min_candidates_for_rebalance: 20     # below this, apply the policy
+  insufficient_universe_policy: hold_cash   # hold_cash | carry_previous (SPEC D12)
+  max_candidates_hard_limit: 400       # safety cap after widening
+
+# --- Data layer -------------------------------------------------------------
+data:
+  provider: fmp
+  cache_backend: db                    # db | parquet (SPEC D2)
+  cache_table: market_data_cache
+  fmp_requests_per_minute: 300         # set to your plan's limit (VERIFY)
+  fmp_timeout_s: 30
+  fmp_max_retries: 3
+  max_fmp_calls_per_backtest: 4000     # stop with DATA_BUDGET_EXCEEDED
+  statement_availability_field: filingDate   # use acceptedDate when it is later
+  price_series:
+    factor_inputs: split_adjusted      # factor panel (returns, volume, adv, momentum)
+    pe_price: raw                      # unadjusted close so P/E matches as-reported EPS
+    simulation: total_return_adjusted  # P&L and benchmarks
+
+# --- Metrics ----------------------------------------------------------------
+metrics:
+  risk_free_annual: 0.0                # SPEC D3
+  trading_days_per_year: 252
+  short_window_min_rebalances: 8       # below this, show the short_window flag
+  annualize_min_years: 1.0             # CAGR only for periods at least this long
+
+# --- Job execution ----------------------------------------------------------
+job:
+  queue: backtest                      # dedicated queue, worker concurrency 1 (BACKTEST_SKILL Rule 5)
+  timeout_s:
+    trailing: 1200
+    full: 5400
+  progress_stages:
+    - fetching_data
+    - building_universe
+    - scoring
+    - simulating
+    - finalizing
+
+# --- Labeling ---------------------------------------------------------------
+# Wording requires compliance review (SPEC D10). The API returns this text in
+# every result payload; the UI renders it from the payload.
+disclaimer: >-
+  Hypothetical backtest, not performance. This analysis simulates a rules-based
+  strategy on historical data; no assets were managed using it. Hypothetical
+  results are prepared with hindsight, have inherent limitations, and do not
+  predict future results. For research purposes only; not investment advice.
+
+flags:
+  always_include: [llm_factors_replaced, survivorship_risk]
