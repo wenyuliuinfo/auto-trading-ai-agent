@@ -88,6 +88,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       LANGFUSE_HOST: http://langfuse:3000
       PINECONE_HOST_URL: http://pinecone-local:5080
+      BACKTEST_QUEUE: backtest
       KLINE_ENABLED: ${KLINE_ENABLED:-true}
       KLINE_NODE_BIN: node
       KLINE_SCRIPT_PATH: /app/tools/stock-sdk-kline/fetch_klines.mjs
@@ -128,6 +129,36 @@ services:
     networks: [backend-net]
     deploy:
       replicas: 1   # increase for more parallel run throughput; Analyst fan-out concurrency is controlled inside the worker, not by replica count alone
+
+  # ---------------------------------------------------------------------
+  # Backtest worker: dedicated queue with concurrency 1. The backtest loop
+  # patches module-level data fetchers globally, so only one job may score
+  # in this process at a time (BACKTEST_SKILL.md Rule 5).
+  # ---------------------------------------------------------------------
+  celery-backtest:
+    build:
+      context: ..
+      dockerfile: src/app/Dockerfile
+    container_name: celery-backtest
+    restart: unless-stopped
+    command: ["celery", "-A", "app.worker", "worker", "--loglevel=info", "--concurrency=1", "-Q", "backtest"]
+    env_file: ../.env
+    environment:
+      POSTGRES_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-thematic_basket}
+      REDIS_URL: redis://redis:6379/0
+      LANGFUSE_HOST: http://langfuse:3000
+      PINECONE_HOST_URL: http://pinecone-local:5080
+      BACKTEST_QUEUE: backtest
+      KLINE_ENABLED: ${KLINE_ENABLED:-true}
+      KLINE_NODE_BIN: node
+      KLINE_SCRIPT_PATH: /app/tools/stock-sdk-kline/fetch_klines.mjs
+      KLINE_TIMEOUT_S: ${KLINE_TIMEOUT_S:-60}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [backend-net]
+    deploy:
+      replicas: 1
 
   # ---------------------------------------------------------------------
   # Next.js UI. Replace `build.context` with your actual frontend path.

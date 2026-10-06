@@ -185,3 +185,81 @@ CREATE TABLE basket_performance (
 
 CREATE INDEX idx_basket_perf_run_id     ON basket_performance(run_id);
 CREATE INDEX idx_basket_perf_as_of_date ON basket_performance(as_of_date);
+
+-- ------------------------------------------------------------
+-- 10. backtest results and child artifacts
+-- ------------------------------------------------------------
+CREATE TABLE backtest_runs (
+    backtest_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id               UUID REFERENCES runs(run_id) ON DELETE CASCADE,
+    mode                 TEXT NOT NULL,
+    status               TEXT NOT NULL DEFAULT 'queued',
+    progress             JSONB,
+    data_source          TEXT,
+    config_hash          TEXT,
+    config_json          JSONB,
+    methodology_version  INT,
+    code_version         TEXT,
+    data_version         TEXT,
+    period_start         DATE,
+    period_end           DATE,
+    initial_cash         NUMERIC,
+    costs_total          NUMERIC,
+    summary              JSONB,
+    attribution          JSONB,
+    flags                JSONB,
+    error_code           TEXT,
+    error_message        TEXT,
+    created_at           TIMESTAMPTZ DEFAULT now(),
+    started_at           TIMESTAMPTZ,
+    finished_at          TIMESTAMPTZ
+);
+
+CREATE INDEX idx_backtest_runs_run_id     ON backtest_runs(run_id);
+CREATE INDEX idx_backtest_runs_mode       ON backtest_runs(mode);
+CREATE INDEX idx_backtest_runs_created_at ON backtest_runs(created_at);
+
+CREATE TABLE backtest_rebalances (
+    backtest_rebalance_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    backtest_id           UUID REFERENCES backtest_runs(backtest_id) ON DELETE CASCADE,
+    idx                   INT NOT NULL,
+    signal_date           DATE NOT NULL,
+    exec_date             DATE NOT NULL,
+    hold_end_date         DATE NOT NULL,
+    candidate_count       INT,
+    eligible_count        INT,
+    basket                JSONB,
+    flags                 JSONB,
+    period_return         NUMERIC,
+    benchmark_returns     JSONB,
+    inputs_summary        JSONB
+);
+
+CREATE INDEX idx_backtest_rebalances_backtest_id ON backtest_rebalances(backtest_id);
+CREATE INDEX idx_backtest_rebalances_idx        ON backtest_rebalances(idx);
+
+CREATE TABLE backtest_equity (
+    backtest_equity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    backtest_id        UUID REFERENCES backtest_runs(backtest_id) ON DELETE CASCADE,
+    series_name        TEXT NOT NULL,
+    points             JSONB NOT NULL
+);
+
+CREATE INDEX idx_backtest_equity_backtest_id ON backtest_equity(backtest_id);
+
+CREATE TABLE backtest_trades (
+    backtest_trade_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    backtest_id       UUID REFERENCES backtest_runs(backtest_id) ON DELETE CASCADE,
+    seq               INT NOT NULL,
+    date              DATE NOT NULL,
+    ticker            TEXT NOT NULL,
+    side              TEXT NOT NULL,
+    shares            NUMERIC NOT NULL,
+    price             NUMERIC NOT NULL,
+    value             NUMERIC NOT NULL,
+    cost              NUMERIC NOT NULL,
+    reason            TEXT NOT NULL
+);
+
+CREATE INDEX idx_backtest_trades_backtest_id ON backtest_trades(backtest_id);
+CREATE INDEX idx_backtest_trades_seq        ON backtest_trades(seq);
