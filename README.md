@@ -81,6 +81,19 @@ The following is the Live Auto Trading AI Agent screen capture.
   <img src="docs/images/auto-trading-agent-report-v3.0.png" alt="Auto Trading Report page" width="900">
 </p>
 
+<p align="center">
+  <img src="docs/images/auto-trading-agent-backtest1.png" alt="Auto Trading Backtest 1 page" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/images/auto-trading-agent-backtest2.png" alt="Auto Trading Backtest 2 page" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/images/auto-trading-agent-backtest3.png" alt="Auto Trading Backtest 3 page" width="900">
+</p>
+
+
 ## Updates (v2.2 → v3.0)
 
 - **Modeling factors** — added `volatility` and `liquidity` to the
