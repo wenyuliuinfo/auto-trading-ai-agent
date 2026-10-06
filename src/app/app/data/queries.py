@@ -7,6 +7,7 @@ never open a session themselves (CONVENTIONS.md §2.1).
 from __future__ import annotations
 
 import math
+import numbers
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -16,6 +17,10 @@ from sqlalchemy import delete, func, select
 from app.data.db import get_session
 from app.data.models import (
     AnalystReport,
+    BacktestEquity,
+    BacktestRebalance,
+    BacktestRun,
+    BacktestTrade,
     Basket,
     BasketPerformance,
     Candidate,
@@ -636,3 +641,331 @@ def finite_float(value: Any) -> float | None:
     if math.isnan(number) or math.isinf(number):
         return None
     return number
+
+
+# --- Backtests ----------------------------------------------------------------
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, numbers.Number):
+        return finite_float(value)
+    return value
+
+
+def _equity_points_json(points: list[Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "date": point.date.isoformat(),
+            "value": finite_float(point.value),
+        }
+        for point in points
+    ]
+
+
+def _trade_json(trade: Any) -> dict[str, Any]:
+    return {
+        "date": trade.date.isoformat(),
+        "ticker": trade.ticker,
+        "side": trade.side,
+        "shares": finite_float(trade.shares),
+        "price": finite_float(trade.price),
+        "value": finite_float(trade.value),
+        "cost": finite_float(trade.cost),
+        "reason": trade.reason,
+    }
+
+
+async def create_backtest_run(
+    run_id: str,
+    mode: str,
+    config_json: JSONDict,
+    config_hash: str,
+    status: str = "queued",
+) -> JSONDict:
+    """Create an immutable backtest row before job execution."""
+    methodology = int(config_json.get("methodology_version", 1))
+    async with get_session() as session:
+        row = BacktestRun(
+            run_id=_u(run_id),
+            mode=mode,
+            status=status,
+            progress={"stage": "queued", "completed": 0, "total": 0},
+            config_json=_jsonable(config_json),
+            config_hash=config_hash,
+            methodology_version=methodology,
+        )
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return _backtest_run_dict(row)
+
+
+def _backtest_run_dict(row: BacktestRun) -> JSONDict:
+    return {
+        "backtest_id": str(row.backtest_id),
+        "run_id": str(row.run_id),
+        "mode": row.mode,
+        "status": row.status,
+        "progress": row.progress or {},
+        "data_source": row.data_source,
+        "config_hash": row.config_hash,
+        "methodology_version": row.methodology_version,
+        "code_version": row.code_version,
+        "data_version": row.data_version,
+        "period_start": row.period_start.isoformat() if row.period_start else None,
+        "period_end": row.period_end.isoformat() if row.period_end else None,
+        "initial_cash": row.initial_cash,
+        "costs_total": row.costs_total,
+        "summary": row.summary or {},
+        "attribution": row.attribution or [],
+        "flags": row.flags or [],
+        "error_code": row.error_code,
+        "error_message": row.error_message,
+        "created_at": row.created_at,
+    }
+
+
+async def get_backtest_run_by_id(backtest_id: str) -> JSONDict | None:
+    async with get_session() as session:
+        row = await session.get(BacktestRun, _u(backtest_id))
+        return _backtest_run_dict(row) if row else None
+
+
+async def get_active_backtest(run_id: str, mode: str) -> JSONDict | None:
+    async with get_session() as session:
+        result = await session.execute(
+            select(BacktestRun)
+            .where(BacktestRun.run_id == _u(run_id))
+            .where(BacktestRun.mode == mode)
+            .where(BacktestRun.status.in_(["queued", "running"]))
+            .order_by(BacktestRun.created_at.desc())
+            .limit(1)
+        )
+        row = result.scalars().first()
+        return _backtest_run_dict(row) if row else None
+
+
+async def get_latest_backtest(run_id: str, mode: str) -> JSONDict | None:
+    async with get_session() as session:
+        result = await session.execute(
+            select(BacktestRun)
+            .where(BacktestRun.run_id == _u(run_id))
+            .where(BacktestRun.mode == mode)
+            .order_by(BacktestRun.created_at.desc())
+            .limit(1)
+        )
+        row = result.scalars().first()
+        return _backtest_run_dict(row) if row else None
+
+
+async def update_backtest_progress(
+    backtest_id: str, progress: JSONDict, status: str | None = None
+) -> None:
+    async with get_session() as session:
+        row = await session.get(BacktestRun, _u(backtest_id))
+        if row is None:
+            raise KeyError(f"backtest {backtest_id} not found")
+        row.progress = progress
+        if status is not None:
+            row.status = status
+        if row.started_at is None and status == "running":
+            row.started_at = datetime.now(UTC)
+        await session.commit()
+
+
+async def update_backtest_status(
+    backtest_id: str,
+    status: str,
+    error_code: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    async with get_session() as session:
+        row = await session.get(BacktestRun, _u(backtest_id))
+        if row is None:
+            raise KeyError(f"backtest {backtest_id} not found")
+        row.status = status
+        row.error_code = error_code
+        row.error_message = error_message
+        await session.commit()
+
+
+async def save_backtest_result(
+    backtest_id: str,
+    *,
+    status: str,
+    data_source: str,
+    code_version: str,
+    data_version: str,
+    period_start: date | None,
+    period_end: date | None,
+    initial_cash: float,
+    costs_total: float,
+    summary: JSONDict,
+    attribution: list[JSONDict],
+    flags: list[str],
+    progress: JSONDict,
+    rebalances: list[JSONDict],
+    series: dict[str, list[Any]],
+    trades: list[Any],
+    error_code: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    """Persist the completed backtest and its child artifacts."""
+    async with get_session() as session:
+        row = await session.get(BacktestRun, _u(backtest_id))
+        if row is None:
+            raise KeyError(f"backtest {backtest_id} not found")
+        row.status = status
+        row.data_source = data_source
+        row.code_version = code_version
+        row.data_version = data_version
+        row.period_start = period_start
+        row.period_end = period_end
+        row.initial_cash = initial_cash
+        row.costs_total = costs_total
+        row.summary = _jsonable(summary)
+        row.attribution = _jsonable(attribution)
+        row.flags = flags
+        row.progress = progress
+        row.error_code = error_code
+        row.error_message = error_message
+        row.finished_at = datetime.now(UTC)
+
+        for rebalance in rebalances:
+            session.add(
+                BacktestRebalance(
+                    backtest_id=_u(backtest_id),
+                    idx=int(rebalance["idx"]),
+                    signal_date=date.fromisoformat(rebalance["signal_date"]),
+                    exec_date=date.fromisoformat(rebalance["exec_date"]),
+                    hold_end_date=date.fromisoformat(rebalance["hold_end_date"]),
+                    candidate_count=rebalance.get("candidate_count"),
+                    eligible_count=rebalance.get("eligible_count"),
+                    basket=_jsonable(rebalance.get("basket", [])),
+                    flags=rebalance.get("flags", []),
+                    period_return=finite_float(rebalance.get("period_return")),
+                    benchmark_returns=_jsonable(rebalance.get("benchmark_returns", {})),
+                    inputs_summary=_jsonable(rebalance.get("inputs_summary", {})),
+                )
+            )
+
+        for name, points in series.items():
+            session.add(
+                BacktestEquity(
+                    backtest_id=_u(backtest_id),
+                    series_name=name,
+                    points=_equity_points_json(points),
+                )
+            )
+
+        for seq, trade in enumerate(trades):
+            session.add(
+                BacktestTrade(
+                    backtest_id=_u(backtest_id),
+                    seq=seq,
+                    date=trade.date,
+                    ticker=trade.ticker,
+                    side=trade.side,
+                    shares=finite_float(trade.shares) or 0.0,
+                    price=finite_float(trade.price) or 0.0,
+                    value=finite_float(trade.value) or 0.0,
+                    cost=finite_float(trade.cost) or 0.0,
+                    reason=trade.reason,
+                )
+            )
+        await session.commit()
+
+
+async def get_backtest_artifacts(backtest_id: str) -> JSONDict:
+    """Return rebalances, series, and trades for one backtest."""
+    async with get_session() as session:
+        rebalances_result = await session.execute(
+            select(BacktestRebalance)
+            .where(BacktestRebalance.backtest_id == _u(backtest_id))
+            .order_by(BacktestRebalance.idx)
+        )
+        rebalances = [
+            {
+                "idx": row.idx,
+                "signal_date": row.signal_date.isoformat(),
+                "exec_date": row.exec_date.isoformat(),
+                "hold_end_date": row.hold_end_date.isoformat(),
+                "candidate_count": row.candidate_count,
+                "eligible_count": row.eligible_count,
+                "basket": row.basket or [],
+                "flags": row.flags or [],
+                "period_return": row.period_return,
+                "benchmark_returns": row.benchmark_returns or {},
+                "inputs_summary": row.inputs_summary or {},
+            }
+            for row in rebalances_result.scalars().all()
+        ]
+
+        equity_result = await session.execute(
+            select(BacktestEquity).where(BacktestEquity.backtest_id == _u(backtest_id))
+        )
+        series = {
+            row.series_name: row.points or []
+            for row in equity_result.scalars().all()
+        }
+
+        trades_result = await session.execute(
+            select(BacktestTrade)
+            .where(BacktestTrade.backtest_id == _u(backtest_id))
+            .order_by(BacktestTrade.seq)
+        )
+        trades = [
+            {
+                "seq": row.seq,
+                "date": row.date.isoformat(),
+                "ticker": row.ticker,
+                "side": row.side,
+                "shares": row.shares,
+                "price": row.price,
+                "value": row.value,
+                "cost": row.cost,
+                "reason": row.reason,
+            }
+            for row in trades_result.scalars().all()
+        ]
+        return {"rebalances": rebalances, "series": series, "trades": trades}
+
+
+async def get_backtest_trades_page(
+    backtest_id: str, limit: int = 25, offset: int = 0
+) -> tuple[list[JSONDict], int]:
+    async with get_session() as session:
+        count_result = await session.execute(
+            select(func.count()).select_from(BacktestTrade).where(
+                BacktestTrade.backtest_id == _u(backtest_id)
+            )
+        )
+        total = int(count_result.scalar_one())
+        result = await session.execute(
+            select(BacktestTrade)
+            .where(BacktestTrade.backtest_id == _u(backtest_id))
+            .order_by(BacktestTrade.seq)
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = [
+            {
+                "seq": row.seq,
+                "date": row.date.isoformat(),
+                "ticker": row.ticker,
+                "side": row.side,
+                "shares": row.shares,
+                "price": row.price,
+                "value": row.value,
+                "cost": row.cost,
+                "reason": row.reason,
+            }
+            for row in result.scalars().all()
+        ]
+        return rows, total

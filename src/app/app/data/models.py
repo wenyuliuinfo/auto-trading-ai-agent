@@ -205,3 +205,102 @@ class BasketPerformance(Base):
     realized_return: Mapped[float | None] = mapped_column(Float, nullable=True)
     benchmark_return: Mapped[float | None] = mapped_column(Float, nullable=True)
     alpha: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class BacktestRun(Base):
+    __tablename__ = "backtest_runs"
+
+    backtest_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=_uuid
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("runs.run_id", ondelete="CASCADE"), nullable=False
+    )
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="queued")
+    progress: Mapped[dict[str, Any] | None] = mapped_column(JSON_TYPE, nullable=True)
+    data_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    config_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    config_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_TYPE, nullable=True)
+    methodology_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    code_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    data_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    period_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    initial_cash: Mapped[float | None] = mapped_column(Float, nullable=True)
+    costs_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    summary: Mapped[dict[str, Any] | None] = mapped_column(JSON_TYPE, nullable=True)
+    attribution: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    flags: Mapped[list[str] | None] = mapped_column(JSON_TYPE, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class BacktestRebalance(Base):
+    __tablename__ = "backtest_rebalances"
+
+    backtest_rebalance_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=_uuid
+    )
+    backtest_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("backtest_runs.backtest_id", ondelete="CASCADE"), nullable=False
+    )
+    idx: Mapped[int] = mapped_column(Integer, nullable=False)
+    signal_date: Mapped[date] = mapped_column(Date, nullable=False)
+    exec_date: Mapped[date] = mapped_column(Date, nullable=False)
+    hold_end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    candidate_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    eligible_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    basket: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON_TYPE, nullable=True)
+    flags: Mapped[list[str] | None] = mapped_column(JSON_TYPE, nullable=True)
+    period_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    benchmark_returns: Mapped[dict[str, float] | None] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    inputs_summary: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+
+
+class BacktestEquity(Base):
+    __tablename__ = "backtest_equity"
+
+    backtest_equity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=_uuid
+    )
+    backtest_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("backtest_runs.backtest_id", ondelete="CASCADE"), nullable=False
+    )
+    series_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    points: Mapped[list[dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=False)
+
+
+class BacktestTrade(Base):
+    __tablename__ = "backtest_trades"
+
+    backtest_trade_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=_uuid
+    )
+    backtest_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("backtest_runs.backtest_id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    shares: Mapped[float] = mapped_column(Float, nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    cost: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str] = mapped_column(String(16), nullable=False)

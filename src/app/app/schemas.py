@@ -105,3 +105,16 @@ class KlineResponse(BaseModel):
 class RunTriggerResponse(BaseModel):
     run_id: str
     status: Literal["queued"] = "queued"
+
+
+class BacktestTriggerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["trailing", "full"]
+
+
+class BacktestTriggerResponse(BaseModel):
+    backtest_id: str
+    run_id: str
+    mode: Literal["trailing", "full"]
+    status: Literal["queued"] = "queued"

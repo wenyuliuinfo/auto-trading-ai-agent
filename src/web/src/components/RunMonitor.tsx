@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Gauge, ListOrdered } from "lucide-react";
+import { FileText, Gauge, LineChart, ListOrdered } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -11,10 +11,11 @@ import {
   RunStatus,
 } from "@/lib/api";
 import { BasketTable } from "./BasketTable";
+import { BacktestSection } from "./BacktestSection";
 import { RankingsTable } from "./RankingsTable";
 import { ReportView } from "./ReportView";
 
-type Tab = "basket" | "rankings" | "report";
+type Tab = "basket" | "rankings" | "report" | "backtest";
 
 interface RunMonitorProps {
   runId: string;
@@ -133,6 +134,13 @@ export function RunMonitor({ runId, initialStatus }: RunMonitorProps) {
           <FileText size={15} aria-hidden />
           Report
         </button>
+        <button
+          className={`segmented-btn${tab === "backtest" ? " segmented-btn-active" : ""}`}
+          onClick={() => setTab("backtest")}
+        >
+          <LineChart size={15} aria-hidden />
+          Backtest
+        </button>
       </div>
 
       {tab === "basket" && basket && basket.length > 0 ? (
@@ -150,6 +158,9 @@ export function RunMonitor({ runId, initialStatus }: RunMonitorProps) {
           runId={runId}
           reportData={report.report_data}
         />
+      ) : null}
+      {tab === "backtest" && status.status === "complete" ? (
+        <BacktestSection runId={runId} />
       ) : null}
       {status.status === "complete" && !basket && !error ? (
         <div className="loading-text">Loading results...</div>

@@ -133,6 +133,122 @@ export interface KlineResponse {
   bars: KlineBar[];
 }
 
+export type BacktestMode = "trailing" | "full";
+export type BacktestStatus =
+  | "not_run"
+  | "disabled"
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "partial"
+  | "failed";
+
+export interface BacktestEquityPoint {
+  date: string;
+  value: number;
+}
+
+export interface BacktestMetric {
+  total_return: number | null;
+  final_value: number | null;
+  cagr?: number | null;
+  volatility: number | null;
+  sharpe: number | null;
+  max_drawdown: number | null;
+  max_drawdown_peak_date?: string | null;
+  max_drawdown_trough_date?: string | null;
+  alpha?: number | null;
+  beta?: number | null;
+  turnover?: number | null;
+  costs_paid?: number | null;
+  tracking_error?: number | null;
+  information_ratio?: number | null;
+  hit_rate?: number | null;
+}
+
+export interface BacktestRebalance {
+  idx: number;
+  signal_date: string;
+  exec_date: string;
+  hold_end_date: string;
+  candidate_count: number | null;
+  eligible_count: number | null;
+  basket: Array<{
+    ticker: string;
+    weight: number;
+    rank?: number | null;
+    sub_exposure?: string | null;
+    composite_score?: number | null;
+  }>;
+  flags: string[];
+  period_return: number | null;
+  benchmark_returns: Record<string, number | null>;
+  inputs_summary: Record<string, unknown>;
+}
+
+export interface BacktestTrade {
+  seq: number;
+  date: string;
+  ticker: string;
+  side: "BUY" | "SELL";
+  shares: number;
+  price: number;
+  value: number;
+  cost: number;
+  reason: string;
+}
+
+export interface BacktestCurrentHolding {
+  ticker: string;
+  company_name: string | null;
+  weight: number | null;
+  rank: number | null;
+  return_6m: number | null;
+  price: number | null;
+  pe_ratio: number | null;
+  market_cap: number | null;
+  kline: {
+    status: "ok" | "insufficient" | "unavailable";
+    mini_url: string | null;
+  };
+}
+
+export interface BacktestPayload {
+  backtest_id?: string;
+  run_id: string;
+  mode: BacktestMode;
+  status: BacktestStatus;
+  progress: { stage: string; completed: number; total: number };
+  data_source?: "fmp" | "stub" | "mixed" | null;
+  methodology_version?: number | null;
+  config_hash?: string | null;
+  code_version?: string | null;
+  data_version?: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  initial_cash?: number | null;
+  costs_total?: number | null;
+  summary: {
+    strategy: BacktestMetric;
+    benchmarks: Record<string, BacktestMetric>;
+  };
+  series: Record<string, BacktestEquityPoint[]>;
+  rebalances: BacktestRebalance[];
+  attribution: Array<{
+    ticker: string;
+    company_name: string | null;
+    pnl: number;
+    contribution_pct: number;
+    periods_held: number;
+  }>;
+  trades: BacktestTrade[];
+  current_holdings: BacktestCurrentHolding[];
+  flags: string[];
+  disclaimer: string;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
 export interface ThemeCreateRequest {
   name: string;
   definition: string;
@@ -177,4 +293,20 @@ export const api = {
   getReport: (runId: string) => request<ReportResponse>(`/runs/${runId}/report`),
   getKline: (runId: string, ticker: string) =>
     request<KlineResponse>(`/runs/${runId}/klines/${ticker}`),
+  getBacktest: (runId: string, mode: BacktestMode = "trailing") =>
+    request<BacktestPayload>(`/runs/${runId}/backtest?mode=${mode}`),
+  startBacktest: (runId: string, mode: BacktestMode) =>
+    request<{ backtest_id: string; run_id: string; mode: BacktestMode; status: "queued" }>(
+      `/runs/${runId}/backtest`,
+      { method: "POST", body: JSON.stringify({ mode }) },
+    ),
+  getBacktestTrades: (
+    runId: string,
+    mode: BacktestMode = "trailing",
+    limit = 25,
+    offset = 0,
+  ) =>
+    request<{ items: BacktestTrade[]; total: number; limit: number; offset: number }>(
+      `/runs/${runId}/backtest/trades?mode=${mode}&limit=${limit}&offset=${offset}`,
+    ),
 };

@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.backtest import router as backtest_router
 from app.api.runs import router as runs_router
 from app.api.themes import router as themes_router
 from app.data.db import dispose_db, init_db
@@ -39,6 +40,7 @@ app.add_middleware(
 
 app.include_router(themes_router)
 app.include_router(runs_router)
+app.include_router(backtest_router)
 
 
 @app.get("/health", tags=["health"])

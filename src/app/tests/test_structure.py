@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[1] / "app"
@@ -21,6 +22,13 @@ def _imports(path: Path) -> set[str]:
 
 def _modules_under(rel: str) -> list[Path]:
     return sorted((APP_ROOT / rel).glob("*.py"))
+
+
+def _modules_tree(rel: str) -> list[Path]:
+    root = APP_ROOT / rel
+    if not root.exists():
+        return []
+    return sorted(path for path in root.rglob("*.py") if "__pycache__" not in path.parts)
 
 
 def test_api_never_imports_integrations_or_evaluation() -> None:
@@ -48,3 +56,26 @@ def test_evaluation_never_imported_from_api_or_agents() -> None:
 def test_worker_lives_at_app_boundary() -> None:
     worker_imports = _imports(APP_ROOT / "worker.py")
     assert any("app.agents.graph" in i for i in worker_imports)
+
+
+def test_backtest_engine_has_no_io_layer_imports() -> None:
+    for path in _modules_tree("backtest"):
+        imports = _imports(path)
+        assert not any(
+            module.startswith(("app.integrations", "app.data", "app.agents"))
+            for module in imports
+        )
+
+
+def test_backtest_path_has_no_llm_client_import() -> None:
+    paths = [*_modules_tree("backtest"), APP_ROOT / "agents" / "backtest.py"]
+    for path in paths:
+        assert "app.integrations.deepseek_client" not in _imports(path)
+
+
+def test_backtest_engine_uses_no_synthetic_value_generators() -> None:
+    banned = re.compile(r"\b(random|gauss|hash|ord)\b")
+    paths = [*_modules_tree("backtest"), APP_ROOT / "agents" / "backtest.py"]
+    for path in paths:
+        source = path.read_text(encoding="utf-8")
+        assert not banned.search(source)
