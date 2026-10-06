@@ -1,206 +1,314 @@
-# Task 3 — Backtest agent and Backtest section
+# Task 3 — Backtest agent and Backtest section (SPEC v2)
 
-Status: DRAFT for review. Items marked **VERIFY** depend on code, endpoints,
-or plan limits that were not inspected when drafting; resolve them in PLAN
-Step 0 and update this file. Open decisions are in §21.
+Status: DRAFT v2 for review. Items marked **VERIFY** depend on code,
+endpoints, or plan limits that were not inspected; resolve them in PLAN Step 0.
+Open decisions are in §21.
 
 Related files: `BACKTEST_SKILL.md` (hard rules), `METHODOLOGY.md`
-(assumptions and limitations), `UI_DESIGN.md`, `PLAN.md`, `TEST_PLAN.md`,
-`config/backtest.yaml`.
+(assumptions), `UI_DESIGN.md`, `PLAN.md`, `TEST_PLAN.md`,
+`config/backtest.yaml`. The previous version is kept in `_archive/SPEC.v1.md`.
+
+## 0. Amendment 1 (what changed and why)
+
+The first implementation did not implement the strategy:
+
+- Full mode generated **fabricated** returns (from character codes and
+  `random.gauss`) at 20 dates and never regenerated a basket.
+- Trailing mode applied **today's basket** to the last 126 stored bars, which
+  is a hindsight replay, not the strategy.
+- No scoring function, `construct_basket`, trade, cost, or real benchmark
+  was involved, and the "QQQ" benchmark was set equal to the strategy.
+
+The v1 spec already required per-rebalance regeneration (§9) but the
+acceptance criteria could be satisfied by a placeholder. v2 fixes this by:
+
+1. Adding **strategy invariants** that cannot be satisfied by a placeholder
+   (§3.1).
+2. Adding **delivery milestones M1–M3** so the real loop is built first, on a
+   labeled stub data store, before real data (§5.2).
+3. Strengthening the **acceptance criteria** (§20) and adding **merge gates**
+   (§25): specific tests that must pass before anything is called a backtest.
+4. Adding a **disposition table** for the existing code (§26).
+5. Aligning config keys with `config/backtest.yaml` and fixing the API
+   contract details (§15, §17).
 
 ## 1. Goal and non-goals
 
 **Goal.** For every run, replay the pipeline's deterministic strategy on
 historical data, simulate a $10K portfolio that follows it, and show the
-result next to the run's Basket, Rankings, and Report as a new **Backtest**
-section: strategy summary, equity curve versus a Nasdaq index fund,
-rebalance timeline, current holdings table, contribution bars, and trade
-blotter.
+result in a **Backtest** section beside the run's Basket, Rankings, and
+Report: summary cards, equity curve versus a Nasdaq index fund, rebalance
+timeline, current holdings table, contribution bars, and trade blotter.
 
 **Non-goals.**
 
 - No change to the Screener, Analyst, Modeling, Trader, or Report agents.
-- No LLM in the backtest path (§3).
+- No LLM in the backtest path.
 - No tuning of factor weights or screens from backtest results.
 - No tax, financing, short-selling, or capacity modeling.
-- No user-adjustable backtest parameters; the API accepts only `mode`.
-- The "current holdings" table does not re-rank anything; it displays the
-  run's live basket.
+- No user-adjustable parameters; the API accepts only `mode`.
+- **No synthetic or fabricated data in any result shown as a backtest.**
+  Stub-store results exist only for tests and labeled demos (§3.1, I3).
+- The current holdings table does not re-rank anything; it shows the run's
+  live basket.
 
-## 2. Owner decisions captured in this draft
+## 2. Owner decisions
 
 | Topic | Decision |
 |---|---|
+| Strategy | Every 3 months regenerate the theme basket from the past data using the system, trade to the calculated weights, hold 3 months, repeat |
 | Thematic score | Number of the theme's mapped ETFs that hold the stock |
-| Sentiment score | Money flow (buying volume minus selling volume), trailing 6 months |
-| Test themes | The theme (its persisted `theme_config`) of each run |
+| Sentiment score | Money flow (buying minus selling volume), trailing 6 months |
+| Test themes | The theme (persisted `theme_config`) of each run |
 | Test years | 2021 – 2025 (**full** mode) |
 | Per-run simulation | The last four quarterly rebalances (**trailing** mode) |
 | UI | Summary cards, equity curve, rebalance timeline, current holdings table, contribution bars, trade blotter, progress and failure states, controls, export |
-| Agent constraint | Backtest agent only **imports** other agents' functions; no edits to other agents |
+| Agent constraint | The Backtest agent only **imports** other agents' functions; no edits to other agents |
 
-## 3. Constraints
+## 3. Constraints and invariants
 
-1. **Import-only reuse** (BACKTEST_SKILL Rule 1).
-2. **No LLM calls**; results are deterministic and reproducible.
-3. **No look-ahead**: strictly as-of data, signal at prior close, execution
-   at the rebalance-date close.
-4. **Hypothetical performance** is labeled everywhere (BACKTEST_SKILL Rule 11).
-5. The backtest never changes the parent run's status.
+### 3.1 Strategy invariants (non-negotiable)
+
+These are properties of any valid backtest. Each has a test in §25.
+
+- **I1 — Regenerate every rebalance.** At every rebalance, the basket is
+  regenerated by running the scoring and selection pipeline (universe →
+  factors → composite → rank → `construct_basket`) on data as of that
+  rebalance's signal date. A basket from one date is never reused for
+  another, and the run's live basket is never used for historical dates.
+- **I2 — Re-adjust every rebalance.** At every execution date the portfolio
+  is traded from its current holdings to the newly calculated target
+  weights (delta trades, with costs).
+- **I3 — No fabricated data.** Results are computed only from real
+  historical data or, for tests and labeled demos, a deterministic **stub
+  store** (§7.3). Nothing outside the stub store may use randomness,
+  identifier-derived numbers, or placeholder returns. Every result carries
+  `data_source` (`fmp`, `stub`, or `mixed`). Stub results are rejected for
+  persistence and display unless `allow_stub_results` is true (default false
+  in production), and the UI shows a "Synthetic data" banner when they are
+  allowed.
+- **I4 — Independent benchmarks.** Benchmark series come from benchmark
+  prices only. They never reuse strategy values.
+- **I5 — No hindsight.** Signals use data dated on or before the signal date;
+  execution is at the rebalance-date close; the canary test must pass.
+- **I6 — Honest status.** `succeeded` means every scheduled rebalance was
+  scored from the declared data source. Anything else is `partial` or
+  `failed` with specific flags. Interim data limitations are always flagged
+  (§5.2).
+
+### 3.2 Other constraints
+
+1. Import-only reuse of other agents (BACKTEST_SKILL Rule 1).
+2. No LLM calls; results are deterministic and reproducible.
+3. Hypothetical performance is labeled everywhere.
+4. The backtest never changes the parent run's status.
 
 ## 4. Strategy definition
 
 ### 4.1 Schedule
 
-- **Rebalance dates:** the first trading day of January, April, July and
-  October.
-- **Signal date:** the last trading day before the rebalance date. All
-  signals use data dated on or before it.
-- **Execution:** at the **rebalance-date close**, trading to target weights
-  (only the deltas are traded; costs apply to traded value).
-- **Hold:** until the next rebalance execution.
-- **Lookbacks:** the live system's native lookbacks are kept (see
-  METHODOLOGY). "6 months" is the momentum and money-flow window; the factor
-  panel also uses 252- and 504-day windows and year-over-year fundamentals,
-  so data is fetched from two years before the first signal.
+- **Trading calendar:** the dates of the primary benchmark's price series
+  (QQQ). This avoids a separate calendar dependency. **VERIFY** the series
+  has no gaps in the tested range.
+- **Rebalance date:** the first calendar-trading date on or after the 1st of
+  January, April, July, and October.
+- **Signal date:** the previous trading date. All signals use data dated on
+  or before it.
+- **Execution:** at the rebalance-date close, trading to target weights.
+- **Hold:** until the next rebalance's execution.
+- **Lookbacks:** the live system's native lookbacks are kept. "6 months" is
+  the momentum and money-flow window; the factor panel also uses 252- and
+  504-day windows and year-over-year fundamentals, so data is fetched from
+  `data_buffer_years` before the first signal.
 
-### 4.2 Modes
+### 4.2 Modes (keys match `config/backtest.yaml → modes`)
 
 | Mode | Trigger | Period | Rebalances |
 |---|---|---|---|
-| `trailing` | Automatically after each run completes (flag), or `POST` | The four most recent **completed** holding periods ending at the run date, plus the in-progress period if it has at least `min_partial_hold_days` trading days | 4 (or 5 with the in-progress period) |
-| `full` | On demand only (`POST`) | 2021-01-04 through 2025-12-31 | 20 |
+| `trailing` | Automatically after a run completes (flag), or `POST` | The four most recent **completed** holding periods ending at the run date, plus the in-progress period when it has at least `min_partial_hold_days` trading days | 4 (or 5) |
+| `full` | On demand only (`POST`); disabled until gate G3 | `modes.full.start` through `modes.full.end` (2021-01-01 to 2025-12-31) | 20 |
 
 A holding period is **completed** when the next rebalance's execution date is
 on or before the run date and its close is available.
 
+```python
+def build_schedule(mode, cfg, run_date, trading_days) -> list[Rebalance]:
+    # trading_days: sorted list of benchmark trading dates
+    # 1. candidate rebalance dates = first trading day on/after the 1st of each
+    #    month in schedule.rebalance_months, across the needed year range
+    # 2. full: keep dates in [start, end]; last period ends at the last
+    #    trading day <= end (truncated if needed)
+    # 3. trailing: keep rebalances whose period is completed as of run_date,
+    #    take the last `completed_periods`; append the in-progress rebalance
+    #    if it is old enough
+    # 4. for each: signal_date = previous trading day; hold_end_date =
+    #    next rebalance exec_date (or period end)
+```
+
 **Example (run date 2026-10-05):** rebalances 2025-10-01, 2026-01-02,
-2026-04-01, 2026-07-01 form the four completed periods (the last ends at the
-2026-10-01 close). The 2026-10-01 rebalance has only two trading days, below
-the 10-day minimum, so the in-progress period is omitted and the curve ends
-at 2026-10-01.
+2026-04-01, 2026-07-01 are the four completed periods (the last ends at the
+2026-10-01 close). The 2026-10-01 rebalance has two trading days, below the
+10-day minimum, so the in-progress period is omitted and the curve ends at
+2026-10-01.
 
 ### 4.3 Capital and trading
 
-- Initial cash $10,000 (config).
-- Fractional shares by default (config; if false, floor shares and leave
-  cash).
-- Transaction cost: 10 bps of traded value per side (config).
-- Cash earns nothing (config `cash_yield_annual: 0.0`).
+- Initial cash $10,000; fractional shares by default.
+- Cost: 10 bps of traded value per side.
+- Cash earns nothing.
 - Dividends are included through total-return-adjusted prices.
 
 ## 5. Architecture
 
-```
-POST /runs/{id}/backtest ──► queue "backtest" (concurrency 1) ──► run_backtest_task
-                                                                       │
-                                  agents/backtest.py (orchestrator)    ▼
-   config/backtest.yaml ─►  ┌───────────────────────────────────────────────┐
-   run.theme_config ──────► │ 1. schedule (backtest/calendar.py)            │
-                            │ 2. prefetch (integrations/historical_data.py) │
-                            │ 3. per rebalance:                             │
-                            │    as_of_context ─► screener.assemble_…       │
-                            │                  ─► factor_panel.get_factor_… │
-                            │                  ─► modeling._build_scoring_… │
-                            │    substitute thematic, sentiment             │
-                            │                  ─► modeling.compute/combine/rank
-                            │                  ─► trader.construct_basket   │
-                            │ 4. simulate (backtest/simulate.py, pure)      │
-                            │ 5. benchmarks + metrics + attribution (pure)  │
-                            │ 6. persist (data/queries.py)                  │
-                            └───────────────────────────────────────────────┘
-                                         │
-                       GET /runs/{id}/backtest ◄── UI Backtest section
+### 5.1 Per-rebalance loop (the required control flow)
+
+```python
+async def run_backtest(run_id, mode):
+    cfg = load_backtest_config()                     # snapshot + hash
+    run = await get_run(run_id)                      # theme_config, run_date
+    store = make_store(cfg)                          # FmpStore or StubStore (§7)
+    schedule = build_schedule(mode, cfg, run.run_date, store.trading_days())
+
+    await store.prefetch(run.theme_config, schedule, progress)      # fetching_data
+    results = []
+    for rb in schedule:                                              # I1: every rebalance
+        res = await asyncio.to_thread(score_rebalance, ctx, rb)      # as-of scoring
+        results.append(res)                                          # own basket per date
+    targets = {r.exec_date: {h["ticker"]: h["weight"] for h in r.basket}
+               for r in results}
+
+    sim = simulate(schedule, targets, store.total_return_prices(), cfg)   # I2, pure
+    bench = build_benchmarks(store, sim, cfg)                            # I4, pure
+    payload = assemble(sim, bench, results, build_current_holdings(run_id), cfg)
+    await save_backtest(payload)
 ```
 
-- **Trigger point:** the code that runs the graph (for example a Celery task)
-  enqueues the backtest after the run succeeds. That orchestration code is not
-  an agent, so it may change (**VERIFY** its location).
-- **Isolation:** its own queue, status, progress, and error handling.
-- **Dependencies on other tasks:** Task 3 supplies the K-line snapshot, mini
-  chart, and chart components that the holdings table reuses. Task 2's
-  liquidity and volatility factors, if merged, work unchanged because they are
-  computed inside `get_factor_panel`/`_build_scoring_frame`. Task 1's delete
-  flow must cascade to the new tables.
+`score_rebalance` is the BACKTEST_SKILL reference implementation (§9). It
+must be called **once per rebalance** and must derive everything from
+`as_of = rb.signal_date`.
+
+### 5.2 Delivery milestones
+
+| Milestone | Data | What it proves | Result labeling |
+|---|---|---|---|
+| **M1 — Real loop on the stub store** | `StubStore`: deterministic synthetic prices, fundamentals, ETF holdings (membership changes over time), and an independent QQQ series | Schedule, per-rebalance regeneration, retargeting, trades, costs, benchmarks, metrics, persistence, API, and UI all work end to end | `data_source: "stub"`, banner "Synthetic data"; not persisted or shown in production |
+| **M2 — Real prices and fundamentals** | `FmpStore`: real adjusted prices, QQQ and SPY, point-in-time statements and market cap; ETF membership from **today's** holdings | Real numbers; trailing mode usable | Flag `universe_not_point_in_time`; chip "Interim universe"; `full` mode stays disabled |
+| **M3 — Point-in-time ETF holdings** | Dated ETF holdings snapshots (SPEC §7) | The full methodology | Flag removed; `full` mode enabled |
+
+The loop, engine, and tests are identical across milestones; only the store
+implementation changes. This forces the real strategy to exist before any
+real data is wired in.
+
+### 5.3 Isolation and dependencies
+
+- Trigger point: the code that runs the graph (for example a Celery task)
+  enqueues the backtest after the run succeeds. That code is not an agent, so
+  it may change (**VERIFY** location).
+- Its own queue, status, progress, and error handling.
+- Task 3 supplies the K-line snapshot, mini chart, and components for the
+  holdings table. Task 2's liquidity and volatility factors work unchanged.
+  Task 1's delete flow must cascade to the new tables.
 
 ## 6. Reuse map (import-only)
 
 | Reused function | Used for | Risk and mitigation |
 |---|---|---|
-| `screener.assemble_candidate_universe(hits, max_candidates)` | Merge, dedupe, cap the point-in-time ETF hits | It calls `search_sector("")` through `enrich_with_market_cap`; patch `screener.search_sector` inside `as_of_context` to return point-in-time rows. Sector-keyword hits are not reconstructed historically (METHODOLOGY). |
-| `factor_panel.get_factor_panel(tickers)` | Raw factors (valuation, growth, quality, momentum, adv, market cap, beta, hist_vol, and any Task 2 columns) | Reads "now" data through `fetch_price_history`/`fetch_fundamentals`; patch those names in `factor_panel` inside `as_of_context`. Uses a thread pool, so patch globally under a lock. |
-| `modeling._build_scoring_frame(panel, reports)` | Builds growth, quality, valuation, momentum, (liquidity, volatility) | Private function; parity test. Called with placeholder reports; `thematic` and `sentiment` columns are then overwritten. |
-| `modeling.compute_factor_scores / combine_scores / rank` | Z-scores, composite, ranking | Pure. Weights are the run's persisted snapshot. |
-| `trader.construct_basket(ranked_list, theme_config)` | Screens, diversification, sizing | Mutates its input (`weight`); pass deep copies. |
-| `deepseek`/`*_node` functions | **Not used** | Rule 1 and 3. |
+| `screener.assemble_candidate_universe(hits, max_candidates)` | Merge, dedupe, cap the point-in-time ETF hits | Calls `search_sector("")` via `enrich_with_market_cap`; patch `screener.search_sector` inside `as_of_context` |
+| `factor_panel.get_factor_panel(tickers)` | Raw factors | Reads "now" data via `fetch_price_history`/`fetch_fundamentals`; patch those names in `factor_panel` inside `as_of_context` under a lock |
+| `modeling._build_scoring_frame(panel, reports)` | Growth, quality, valuation, momentum, (liquidity, volatility) | Private; parity test; placeholder reports, then `thematic` and `sentiment` columns are overwritten |
+| `modeling.compute_factor_scores / combine_scores / rank` | Z-scores, composite, ranking | Pure; weights from the run's persisted snapshot |
+| `trader.construct_basket(ranked_list, theme_config)` | Screens, diversification, sizing | Mutates its input; pass deep copies |
+| `*_node` functions, LLM clients | **Not used** | BACKTEST_SKILL Rules 1, 3 |
 
-`build_ranked_entries` (new, in the Backtest agent) reproduces the dictionary
-that `modeling_node` builds inline: `ticker`, `company_name`,
-`gics_subindustry`, `sub_exposure`, `sub_exposure_tags`, `composite_score`
-(`None` if NaN), `rank`, `market_cap`, `avg_dollar_volume` (from `adv`),
-`thematic_relevance_score`, `sentiment`, `factor_contributions`, `caveats`
-(`[]`). Candidate rows are sorted by ticker before scoring so ties break
-deterministically (Modeling Rule 7).
+Tests must **spy** on `construct_basket`, `compute_factor_scores`, and
+`get_factor_panel` and assert they are called once per rebalance (§25).
 
-## 7. As-of data layer (`app/integrations/historical_data.py`)
+`build_ranked_entries` reproduces the dictionary `modeling_node` builds
+inline: `ticker`, `company_name`, `gics_subindustry`, `sub_exposure`,
+`sub_exposure_tags`, `composite_score` (`None` if NaN), `rank`, `market_cap`,
+`avg_dollar_volume` (from `adv`), `thematic_relevance_score`, `sentiment`,
+`factor_contributions`, `caveats` (`[]`). Candidate rows are sorted by ticker
+before scoring so ties break deterministically.
 
-`HistoricalStore` fetches from FMP, caches, and exposes as-of views. Every
-accessor requires `as_of` and never returns later data.
+## 7. As-of data layer
 
-| Dataset | Source (**VERIFY** endpoints and plan depth) | Point-in-time rule | Used for |
+### 7.1 Store interface
+
+`app/integrations/historical_data.py` defines a `HistoricalStore` protocol
+with two implementations: `FmpStore` (real) and `StubStore` (tests and labeled
+demos). Both expose the same accessors, each requiring `as_of`:
+
+```python
+trading_days() -> list[date]
+prefetch(theme_config, schedule, progress) -> None
+make_price_fetcher(as_of) -> Callable[..., PriceHistory]         # split-adjusted
+make_fundamentals_fetcher(as_of) -> Callable[..., Fundamentals]  # point-in-time
+etf_universe(sub_exposures, as_of) -> dict[str, list[dict]]      # hits per sub-exposure
+etf_membership(as_of) -> dict[str, set[str]]                     # ticker -> ETFs
+ohlcv(tickers, as_of) -> dict[str, DataFrame]                    # for money flow
+reference_rows(as_of) -> list[dict]                              # for patched search_sector
+total_return_prices() -> dict[str, dict[date, float]]            # simulation only
+benchmark_prices(name) -> dict[date, float]
+provenance() -> {"data_source": "fmp|stub|mixed", "data_version": str, "flags": [...]}
+```
+
+### 7.2 Datasets (`FmpStore`; **VERIFY** endpoint names, parameters, depth)
+
+| Dataset | Source | Point-in-time rule | Used for |
 |---|---|---|---|
-| Split-adjusted daily OHLCV | FMP historical prices, split-adjusted | `date <= as_of` | Factor panel via patched `fetch_price_history`; money flow |
+| Split-adjusted daily OHLCV | FMP historical prices, split-adjusted | `date <= as_of` | Factor panel via patched fetcher; money flow |
 | Raw (unadjusted) close | FMP historical prices, unadjusted | `date <= as_of` | `Fundamentals.price` so P/E matches as-reported EPS |
-| Total-return-adjusted close | FMP historical prices, dividend- and split-adjusted | `date <= execution day` | Simulation P&L and benchmarks only |
-| Quarterly income, balance sheet, cash flow | FMP statements with `filingDate` and `acceptedDate` | `filingDate <= as_of` (use `acceptedDate` when it is later than the filing date) | Patched `fetch_fundamentals` |
+| Total-return-adjusted close | FMP historical prices, dividend- and split-adjusted | Simulation dates only | P&L and benchmarks |
+| Quarterly income, balance sheet, cash flow | FMP statements with `filingDate`, `acceptedDate` | `filingDate <= as_of` (use `acceptedDate` when later) | Patched `fetch_fundamentals` |
 | Historical market cap | FMP historical market capitalization | `date <= as_of` | `Fundamentals.market_cap`; universe capping |
-| ETF holdings snapshots | FMP ETF holdings with a `date` parameter (documented in FMP FAQ; coverage for thematic ETFs **VERIFY**); N-PORT-based fund disclosures as fallback (public about 60 days after quarter end) | Latest snapshot with `snapshot_date + lag <= as_of` and age `<= etf_snapshot_max_age_days` | Universe and `etf_breadth` |
-| Benchmark prices (QQQ, SPY) | FMP historical, total-return-adjusted | Same as simulation | Benchmarks |
+| ETF holdings snapshots | M3: FMP ETF holdings with a `date` parameter (documented in FMP's FAQ; coverage for thematic ETFs **VERIFY**), N-PORT-based disclosures as fallback (public about 60 days after quarter end). **M2: today's holdings** | Latest snapshot with `snapshot_date + lag <= as_of` and age `<= etf_snapshot_max_age_days` | Universe and `etf_breadth` |
+| Benchmark prices (QQQ, SPY) | FMP historical, total-return-adjusted | Simulation dates | Benchmarks and trading calendar |
 
-### 7.1 Patched fetchers
+Patched fetchers:
 
-- `fetch_price_history(ticker, lookback_days=504)` returns
-  `PriceHistory(ticker, close, volume, source="backtest")` from the
-  split-adjusted series, sliced to `<= as_of`, last `lookback_days` rows.
-- `fetch_fundamentals(ticker)` returns a `Fundamentals` object:
-  - `price` = raw close at `as_of`
-  - `market_cap` = historical market cap at `as_of`
-  - TTM fields = sum of the latest four quarters with `filingDate <= as_of`
-  - `total_debt`, `cash`, `shareholders_equity` = latest filed balance sheet
-  - `revenue_growth_yoy`, `eps_growth_yoy` = **defined exactly as in
-    `integrations/fmp.py::fetch_fmp_fundamentals`** (**VERIFY**; mirror, do
-    not reinvent)
-  - `source = "backtest_pit"`
-  - Missing quarters yield `None` fields, never zeros.
-- Unknown tickers raise; the factor panel already converts that to a NaN row.
+- `fetch_price_history(ticker, lookback_days=504)` → `PriceHistory(ticker,
+  close, volume, source="backtest")` from the split-adjusted series, sliced to
+  `<= as_of`; accepts positional and keyword `lookback_days`.
+- `fetch_fundamentals(ticker)` → `Fundamentals` with `price` = raw close at
+  `as_of`; `market_cap` = historical market cap; TTM fields = sum of the latest
+  four filed quarters; balance-sheet fields from the latest filed statement;
+  `revenue_growth_yoy`/`eps_growth_yoy` defined **exactly as in
+  `fmp.py::fetch_fmp_fundamentals`** (**VERIFY**); `source="backtest_pit"`;
+  missing quarters give `None`, never zero.
+- Unknown tickers raise; the factor panel converts that to a NaN row.
 
-### 7.2 Cache, budget, and rate limits
+Cache, budget, and rate limiting: cache key `(dataset, ticker_or_etf,
+range, fetch_version)`; one full-history fetch per ticker per dataset;
+`max_fmp_calls_per_backtest` stops the job with `DATA_BUDGET_EXCEEDED` and a
+`partial` result; `fmp_requests_per_minute` with backoff on 429.
 
-- Cache key: `(dataset, ticker or etf, as_of_or_range, fetch_version)`.
-  Default backend is a `market_data_cache` table (D2).
-- Prefetch phase: one full-history fetch per ticker per dataset, so every
-  rebalance is served from cache.
-- Budget: `max_fmp_calls_per_backtest` (config). On exceeding it, stop with
-  `DATA_BUDGET_EXCEEDED` and return a `partial` result for the rebalances
-  already scored.
-- Rate limiting: `fmp_requests_per_minute` (config), with backoff on 429.
-- Rough size: about five calls per candidate ticker plus one holdings call
-  per ETF per rebalance; shared tickers across themes are fetched once.
+### 7.3 StubStore (M1; tests and labeled demos only)
+
+Lives in `app/integrations/historical_data_stub.py`. The only module besides
+test fixtures allowed to use randomness. Requirements:
+
+- Seeded and deterministic (same seed, same data).
+- At least 60 tickers across 3+ sub-exposures with persistent but varying
+  factor exposures, so **rankings change between dates**.
+- Quarterly-varying ETF membership (including ETFs that "launch" later).
+- Synthetic filed statements with filing dates.
+- An **independent** QQQ and SPY series (separate seeds from the stocks).
+- `provenance()` returns `data_source: "stub"`.
 
 ## 8. Signals
 
 ### 8.1 Thematic score: ETF breadth
 
-`etf_breadth(ticker) = number of distinct ETFs, among those mapped to the
-theme's sub-exposures in config/sub_exposure_etf_map.yaml, whose holdings
-snapshot at the signal date contains the ticker.`
+`etf_breadth(ticker)` = the number of distinct ETFs, among those mapped to the
+theme's sub-exposures in `config/sub_exposure_etf_map.yaml`, whose holdings
+snapshot at the signal date contains the ticker.
 
 - An ETF counts once even if mapped to several sub-exposures.
-- ETFs without a valid snapshot at that date (not yet launched, or snapshot
-  too old) are excluded and recorded in the rebalance flags.
-- Tickers are normalized (upper case); cash, futures, and non-equity lines
-  are dropped.
-- The value is used as-is; Modeling z-scores it cross-sectionally.
+- ETFs without a valid snapshot at that date are excluded and recorded in the
+  rebalance flags.
+- Tickers are upper-cased; cash, futures, and non-equity lines are dropped.
+- At M2 (today's holdings) the breadth is identical at every date; this is the
+  reason for the `universe_not_point_in_time` flag.
 
 ### 8.2 Sentiment score: money-flow ratio
 
@@ -208,23 +316,22 @@ Using split-adjusted daily OHLCV over the 126 trading days ending at the
 signal date:
 
 ```
-clv_t   = ((close_t - low_t) - (high_t - close_t)) / (high_t - low_t)   # 0 if high == low
-flow_t  = clv_t * volume_t                    # + buying pressure, - selling pressure
-money_flow_ratio = sum(flow_t) / sum(volume_t)        # in [-1, 1]
+clv_t  = ((close_t - low_t) - (high_t - close_t)) / (high_t - low_t)   # 0 if high == low
+flow_t = clv_t * volume_t
+money_flow_ratio = sum(flow_t) / sum(volume_t)                          # in [-1, 1]
 ```
 
 This approximates "buying volume minus selling volume" from daily bars,
-normalized by total volume so company size does not dominate. True
-buy/sell-initiated volume needs trade-level data (see METHODOLOGY). Require at
-least `money_flow_min_obs` valid days (default 100), else `NaN`.
-
-Alternative definition (D8): signed volume by close-to-close direction.
+normalized by total volume. Require at least `money_flow_min_obs` valid days,
+else `NaN`. Alternative (D8): signed volume by close-to-close direction.
 
 ## 9. Scoring and selection per rebalance
 
-1. Build the point-in-time hits `{sub_exposure: [ticker rows]}` from ETF
-   snapshots (each row: `ticker`, `company_name`, `gics_subindustry`,
-   `market_cap` at the signal date).
+Executed **once per rebalance** from `as_of = signal_date` (I1):
+
+1. Build point-in-time hits `{sub_exposure: [ticker rows]}` (each row:
+   `ticker`, `company_name`, `gics_subindustry`, `market_cap` at the signal
+   date).
 2. Inside `as_of_context`: `assemble_candidate_universe(hits, max_candidates)`.
 3. If fewer than `min_candidates_for_rebalance` candidates: flag
    `insufficient_universe` and apply `insufficient_universe_policy`
@@ -233,59 +340,88 @@ Alternative definition (D8): signed volume by close-to-close direction.
 5. `_build_scoring_frame` with placeholder reports, then overwrite `thematic`
    and `sentiment` with the substitute signals.
 6. `compute_factor_scores`, `combine_scores`, `rank` using the run's
-   `theme_config["factor_weights"]`. Fail fast if a weight key has no matching
-   column.
+   `theme_config["factor_weights"]`; fail fast if a weight key has no column.
 7. `build_ranked_entries`, then `construct_basket(deepcopy(entries),
-   theme_config)` using the run's `screens`, `weighting_scheme`, and
+   theme_config)` with the run's `screens`, `weighting_scheme`, and
    `max_per_sub_industry`.
 8. If the basket has fewer than 5 names, widen the universe by calling
-   `assemble_candidate_universe` again with `max_candidates + 100 *
-   retry` up to `max_widen_retries` (default 2; **VERIFY** against the
-   live graph's `check_basket_complete`). If still empty: hold cash and flag
-   `no_basket`. If 1–4 names: invest and flag `partial_basket`.
-9. Record inputs summary (counts, flags, top-ranked names, substitute-signal
-   values) for the rebalance row.
+   `assemble_candidate_universe` again with `max_candidates + 100 * retry`, up
+   to `max_widen_retries` (**VERIFY** against the live graph). If still empty:
+   hold cash, flag `no_basket`. If 1–4 names: invest, flag `partial_basket`.
+9. Return a `RebalanceResult` holding the basket (with weights), near misses,
+   warnings, flags, and an `inputs_summary` (candidate and eligible counts,
+   number of valid ETF snapshots, top-ranked tickers, substitute-signal
+   values). Each rebalance's result is persisted separately.
 
-## 10. Simulation and accounting (`app/backtest/`)
+## 10. Simulation and accounting (`app/backtest/simulate.py`, pure)
 
-- State: `cash`, `positions {ticker: shares}`.
-- At each execution date: compute target dollars from portfolio value ×
-  weight, trade deltas at the total-return-adjusted close, charge
-  `cost_bps × |trade value|`, record each trade with a reason
-  (`entry`, `exit`, `increase`, `decrease`).
-- Between rebalances: daily mark-to-market, no trading.
+Contract:
+
+```python
+simulate(rebalances, targets, prices, cfg) -> SimulationResult
+# rebalances: list[Rebalance]            (from build_schedule)
+# targets:    {exec_date: {ticker: weight}}   weights sum to <= 1; remainder is cash
+# prices:     {ticker: {date: total_return_adjusted_close}}
+# no I/O, no clock, no randomness
+```
+
+Algorithm:
+
+```
+cash = initial_cash; shares = {}
+for d in trading_days from first exec_date to period end:
+    if d is an exec_date:
+        value = cash + sum(shares[t] * price(t, d))
+        est_cost = bps * sum(|w_t * value - shares[t] * price(t, d)| for t in held ∪ targets)
+        for t in held ∪ targets:
+            target_value = (value - est_cost) * w_t
+            delta_value  = target_value - shares[t] * price(t, d)
+            apply fractional or floor rule; record Trade(date, ticker, side, shares,
+                price, value, cost = bps * |delta_value|, reason)
+            update shares and cash
+    record EquityPoint(d, cash + sum(shares[t] * price(t, d)))
+```
+
+- Reasons: `entry`, `exit`, `increase`, `decrease`.
+- Only deltas are traded; a retained name with an unchanged weight still
+  drifts and is retargeted at the next rebalance.
+- Residual cash error from cost estimation is within one cent per rebalance.
 - Missing price at execution: skip the buy, flag `missing_prices`, leave the
   weight in cash.
-- Price series ending during a hold (delisting): follow
-  `delisting_policy` (default `last_price_then_cash`) and flag
-  `delisted_holding`.
+- Price series ending during a hold: `delisting_policy`
+  (`last_price_then_cash`), flag `delisted_holding`.
+- No forward-fill beyond `max_price_gap_days`.
+- The equity series has **one point per trading day** from the first
+  execution date, not only at rebalances.
 - Identities (tested): value = cash + Σ shares × price at every date; Σ ticker
-  P&L − costs = total P&L.
+  P&L − costs = total P&L; Σ trade costs = `costs_total`.
 
 ## 11. Benchmarks
 
-Primary: **QQQ** total return (Nasdaq-100 fund). Optional (config-enabled):
-SPY, equal-weight of the theme's mapped ETFs available at each date, and
-equal-weight of the candidate universe at each rebalance. Each benchmark
-starts on the same date with the same cash and the same one-time entry cost.
-Benchmarks and strategy use the same date axis.
+Primary: **QQQ** total return. Optional (config): SPY, equal-weight of the
+theme's mapped ETFs available at each date, and equal-weight of each
+rebalance's candidate universe. Each benchmark starts on the same date with
+the same cash and the same one-time entry cost, uses the same date axis, and
+is computed from `store.benchmark_prices` and candidate prices only. It must
+not read strategy values (I4).
 
 ## 12. Metrics
 
 Computed for the strategy and each benchmark from daily values (net of
-costs): total return, final value of $10K, CAGR (annualized only if the period
-is at least one year), annualized volatility, Sharpe (risk-free per config,
-default 0), max drawdown (and dates), beta and alpha versus the primary
-benchmark (daily regression), tracking error, information ratio, quarterly
-hit rate (periods beating the benchmark), turnover (annualized sum of buys
-divided by average value), total costs paid. Short-window warning when fewer
-than 8 rebalances.
+costs): total return, final value of $10K, CAGR (only if the period is at
+least one year), annualized volatility (sample standard deviation of daily
+returns × √252), Sharpe (risk-free per config, default 0), max drawdown (and
+dates), beta and alpha versus the primary benchmark (daily regression),
+tracking error, information ratio, quarterly hit rate, turnover (annualized
+buys divided by average value), total costs paid. `short_window` flag when
+fewer than 8 rebalances. A metric that cannot be computed is `null`, not 0.
 
 ## 13. Attribution
 
-Per ticker: P&L = Σ over holding periods of `shares × (exit price − entry
-price)` (including partial-period exits), contribution = P&L / initial cash,
-periods held. A separate "costs" item. The list plus costs sums to total P&L.
+Per ticker, across all holding periods: P&L = Σ over trades and marks of
+`shares × (exit or final price − entry price)`, contribution = P&L / initial
+cash, periods held. A separate "costs" item. The list plus costs sums to total
+P&L (identity test).
 
 ## 14. Persistence
 
@@ -294,21 +430,22 @@ cascades from runs (and from theme deletion, per Task 1).
 
 | Table | Key columns |
 |---|---|
-| `backtest_runs` | `id`, `run_id`, `mode`, `status`, `progress` (JSON), `config_hash`, `config_json`, `methodology_version`, `code_version`, `data_version`, `period_start`, `period_end`, `summary` (JSON), `attribution` (JSON), `flags` (JSON), `error_code`, `error_message`, `created_at`, `started_at`, `finished_at` |
+| `backtest_runs` | `id`, `run_id`, `mode`, `status`, `progress` (JSON), `data_source`, `config_hash`, `config_json`, `methodology_version`, `code_version`, `data_version`, `period_start`, `period_end`, `summary` (JSON), `attribution` (JSON), `flags` (JSON), `error_code`, `error_message`, `created_at`, `started_at`, `finished_at` |
 | `backtest_rebalances` | `backtest_id`, `idx`, `signal_date`, `exec_date`, `hold_end_date`, `candidate_count`, `eligible_count`, `basket` (JSON), `flags` (JSON), `period_return`, `benchmark_returns` (JSON), `inputs_summary` (JSON) |
 | `backtest_equity` | `backtest_id`, `series_name`, `points` (JSONB `[{date, value}]`) |
 | `backtest_trades` | `backtest_id`, `seq`, `date`, `ticker`, `side`, `shares`, `price`, `value`, `cost`, `reason` |
 | `market_data_cache` | per §7.2 |
 
 A new backtest for the same `(run_id, mode)` creates a new row; the API returns
-the latest unless `backtest_id` is given.
+the latest unless `backtest_id` is given. Results with `data_source = stub` are
+not persisted unless `allow_stub_results` is true.
 
-## 15. API (additive; align with existing route conventions, **VERIFY**)
+## 15. API (additive; align with existing conventions, **VERIFY**)
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /runs/{run_id}/backtest` body `{mode}` | Enqueue; `202` with `backtest_id`; idempotent while one is queued or running for the same mode |
-| `GET /runs/{run_id}/backtest?mode=trailing\|full` | Status, progress, and the result (below) |
+| `POST /runs/{run_id}/backtest` body `{mode}` | Enqueue; `202` with `backtest_id`; idempotent while one is queued or running for the same mode; `409` if the mode is disabled (`modes.<mode>.enabled`) |
+| `GET /runs/{run_id}/backtest?mode=trailing\|full` | Status, progress, and result |
 | `GET /runs/{run_id}/backtest/trades` | Paginated blotter |
 | `GET /runs/{run_id}/backtest/export?format=csv\|json&part=equity\|trades\|rebalances` | Attachment |
 
@@ -316,87 +453,120 @@ Result shape (abridged):
 
 ```json
 {
-  "backtest_id": "...", "run_id": "...", "mode": "trailing",
-  "status": "succeeded",
+  "backtest_id": "...", "run_id": "...", "mode": "trailing", "status": "succeeded",
+  "data_source": "fmp",
   "progress": {"stage": "finalizing", "completed": 4, "total": 4},
   "methodology_version": 1, "config_hash": "…", "code_version": "…", "data_version": "…",
   "period": {"start": "2025-10-01", "end": "2026-10-01"},
   "initial_cash": 10000,
   "summary": {"strategy": {"total_return": 0.0, "final_value": 0.0, "max_drawdown": 0.0,
-                           "sharpe": 0.0, "alpha": 0.0, "beta": 0.0, "hit_rate": 0.0,
-                           "turnover": 0.0, "costs_paid": 0.0},
-              "benchmarks": {"QQQ": {"total_return": 0.0}}},
-  "series": {"strategy": [{"date": "…", "value": 0.0}], "QQQ": []},
-  "rebalances": [{"idx": 0, "signal_date": "…", "exec_date": "…", "basket": [],
-                  "period_return": 0.0, "benchmark_returns": {"QQQ": 0.0}, "flags": []}],
+                           "volatility": 0.0, "sharpe": 0.0, "alpha": 0.0, "beta": 0.0,
+                           "hit_rate": 0.0, "turnover": 0.0, "costs_paid": 0.0},
+              "benchmarks": {"QQQ": {"total_return": 0.0, "final_value": 0.0,
+                                     "max_drawdown": 0.0}}},
+  "series": {"strategy": [{"date": "…", "value": 0.0}], "QQQ": [], "SPY": []},
+  "rebalances": [{"idx": 0, "signal_date": "…", "exec_date": "…", "hold_end_date": "…",
+                  "basket": [], "period_return": 0.0,
+                  "benchmark_returns": {"QQQ": 0.0}, "flags": [], "inputs_summary": {}}],
   "attribution": [{"ticker": "…", "company_name": "…", "pnl": 0.0,
                    "contribution_pct": 0.0, "periods_held": 0}],
   "costs_total": 0.0,
   "current_holdings": [{"ticker": "…", "company_name": "…", "weight": 0.0,
                         "return_6m": 0.0, "price": 0.0, "pe_ratio": 0.0,
-                        "market_cap": 0.0, "kline": {"status": "ok", "mini_url": "…"}}],
+                        "market_cap": 0.0,
+                        "kline": {"status": "ok", "mini_url": "/api/runs/{run_id}/klines/{ticker}/mini.svg"}}],
   "flags": ["short_window", "survivorship_risk", "llm_factors_replaced"],
   "disclaimer": "…"
 }
 ```
 
-`current_holdings` is assembled at read time from existing data: the run's
-basket (`get_basket_with_scores`), raw factor rows (`pe_ratio`, `market_cap`,
-`momentum_6m`), and Task 3's K-line snapshot (price = last close; 6-month
-return as in Task 3). P/E shows `null` when missing and the UI displays "n/m"
-for non-positive values.
+`current_holdings` is assembled at read time (`build_current_holdings`): the
+run's basket (`get_basket_with_scores`), raw factor rows (`pe_ratio`,
+`market_cap`, `momentum_6m`), and Task 3's K-line snapshot (price = last close).
+The `mini_url` must match Task 3's contract (`/api/runs/{run_id}/klines/
+{ticker}/mini.svg`). P/E is `null` when missing; the UI shows "n/m" for
+non-positive values. The strategy's rebalance baskets in `rebalances[]` come
+from scoring, **never** from the live basket.
 
 ## 16. Job orchestration
 
 - Queue `backtest`, worker concurrency 1 per process (global patch safety).
 - Stages: `fetching_data`, `building_universe`, `scoring`, `simulating`,
-  `finalizing`; progress `{stage, completed, total}`.
-- Timeouts: per job (`job_timeout_s`), per FMP request (`fmp_timeout_s`).
-- Retries: transient fetch errors are retried inside the data layer; a failed
-  job can be re-queued by `POST`.
-- Status: `succeeded`, `partial` (any rebalance failed or was empty, or data
-  budget hit), `failed` (no rebalance scored).
-- Auto-trigger of `trailing` after a run succeeds is controlled by
-  `auto_trigger_trailing` (config). `full` is never automatic.
-- The parent run's status and the run API are unaffected by backtest state.
+  `finalizing`; progress `{stage, completed, total}` where `scoring` counts
+  rebalances.
+- Timeouts per job and per FMP request.
+- Status: `succeeded` (all scheduled rebalances scored, I6), `partial` (any
+  rebalance failed or was empty, or data budget hit), `failed` (no rebalance
+  scored).
+- `auto_trigger_trailing` (config) enqueues `trailing` after a run succeeds;
+  `full` is never automatic.
+- Parent run status and the run API are unaffected.
 
 ## 17. Configuration
 
-`config/backtest.yaml` (see the file). Read once at job start; the snapshot and
-SHA-256 hash are stored with the result. Not accepted from API input.
+`config/backtest.yaml` is read once at job start; the snapshot and SHA-256
+hash are stored with the result; not accepted from API input. Config keys
+used by the code: `modes.<mode>`, `schedule`, `capital`, `benchmarks`,
+`signals`, `universe`, `data`, `metrics`, `job`, `disclaimer`, `flags`. The
+previous code read a non-existent `selection_mode`; the mode comes only from
+the API/CLI argument.
+
+**Additions required by v2** (add to `config/backtest.yaml`):
+
+```yaml
+modes:
+  trailing:
+    enabled: false          # keep false until gate G2 passes
+  full:
+    enabled: false          # keep false until gate G3 passes
+
+data:
+  allow_stub_results: false  # true only in dev/test environments
+```
+
+The disclaimer text in results is read from the config (`disclaimer`), not
+hard-coded in the agent.
 
 ## 18. Security and compliance
 
-- Hypothetical-performance wording and disclaimer come from the payload; get
-  compliance review of `METHODOLOGY.md` and UI copy before client use.
-- Data-provider terms: confirm FMP plan permits the stored/derived use and any
-  display of derived data.
-- Inputs are tickers from FMP and the run's own state; validate with the
-  existing symbol pattern before building cache keys or URLs.
-- No user-supplied paths or parameters reach the data layer.
-- Exports neutralize spreadsheet formula prefixes in text fields.
+- Hypothetical-performance wording and the disclaimer come from config and the
+  payload; compliance reviews `METHODOLOGY.md` and UI copy before client use.
+- Confirm the FMP plan permits stored and derived use, and display of derived
+  data.
+- Validate tickers with the existing symbol pattern before building cache keys
+  or URLs; no user-supplied paths or parameters reach the data layer.
+- Exports neutralize spreadsheet formula prefixes.
+- Synthetic data is labeled and cannot be mistaken for real results (I3).
 
 ## 19. Backward compatibility and rollback
 
 - No changes to existing tables or agent code; new tables and endpoints only.
 - Legacy runs have no backtest; the UI shows "Run backtest".
-- Rollback: set `enabled: false` in config (endpoints return a disabled
-  state, no jobs run) or revert the deploy; new tables are harmless.
+- Rollback: `enabled: false` (no jobs; disabled state) or revert the deploy.
+- **Immediate containment of the v1 defect:** set `enabled: false`, and
+  delete or quarantine `simulate_full_history` and the trailing hindsight
+  replay (§26).
 
 ## 20. Acceptance criteria
 
-- **A1.** No file under `app/agents/{screener,analyst,modeling,trader,report}.py`
-  or other agents is modified.
-- **A2.** The structure test passes: no LLM client import in the backtest
-  path; `app/backtest/**` imports no I/O layers and no clock calls.
-- **A3.** Look-ahead canary: poisoning data after `as_of` changes nothing.
-- **A4.** Parity: with the same panel and substitute columns, backtest scoring
-  equals the live functions' output.
-- **A5.** Trailing mode on a fixture run yields 4 completed periods (plus the
-  in-progress one only when eligible), with correct signal and execution
-  dates.
-- **A6.** Full mode on a fixture covers 2021-01-04 to 2025-12-31 with 20
-  rebalances.
+Carried forward and strengthened (A1–A14), plus new criteria (A15–A24).
+
+- **A1.** No existing agent file is modified (CI diff check).
+- **A2.** Structure tests pass: no LLM client import in the backtest path;
+  `app/backtest/**` imports no I/O layers and has no clock calls.
+- **A3.** Look-ahead canary: poisoning data dated after `as_of` changes no
+  candidate, score, rank, or basket.
+- **A4.** Parity: with the same panel and substitute columns, the backtest
+  scoring path equals the live functions' output.
+- **A5 (strengthened).** In trailing mode, the scoring pipeline
+  (`get_factor_panel`, `compute_factor_scores`, `construct_basket`) runs **once
+  per rebalance**, each with `as_of` equal to that rebalance's signal date;
+  rebalance dates and the four-completed-periods rule are correct; the run's
+  live basket is not used for any historical date.
+- **A6 (strengthened).** In full mode on a fixture, there are 20 rebalances,
+  each with its own scoring result and `inputs_summary`; on a fixture where the
+  rank order changes between dates, at least two rebalances have different
+  baskets and the trades reflect the difference.
 - **A7.** Accounting identities hold (value and attribution).
 - **A8.** Benchmarks start on the same date with the same cash and entry
   cost.
@@ -405,71 +575,164 @@ SHA-256 hash are stored with the result. Not accepted from API input.
 - **A10.** A data failure in one rebalance yields `partial`; the parent run is
   unaffected.
 - **A11.** Results are immutable and carry config hash, methodology version,
-  code version, and data version.
-- **A12.** The Backtest section renders all nine UI elements (UI_DESIGN) with
-  loading, running, partial, failed, and disabled states.
-- **A13.** Disclaimer and hypothetical labeling appear in the API payload,
-  UI, and exports.
+  code version, data version, and `data_source`.
+- **A12.** The Backtest section renders all UI elements with loading,
+  running, partial, failed, and disabled states.
+- **A13.** Disclaimer and hypothetical labeling appear in the payload, UI, and
+  exports.
 - **A14.** Docs are updated (§24) and the full check suite passes.
+- **A15 (retargeting).** After each execution date, positions match the target
+  weights within tolerance (cost and fractional-share effects), and each trade
+  equals the difference between current and target holdings.
+- **A16 (no fabricated data).** A static check fails on `random`, `gauss`,
+  `hash(`, or `ord(` used to produce values anywhere in `app/backtest/**` and
+  `FmpStore`; the only exception is `StubStore` and test fixtures.
+- **A17 (stub labeling).** Stub results carry `data_source: "stub"`, are
+  rejected unless `allow_stub_results` is true, and show a banner in the UI.
+- **A18 (benchmark independence).** Changing strategy inputs leaves benchmark
+  series unchanged; poisoning benchmark prices changes only benchmark series;
+  the benchmark total return is not copied from the strategy.
+- **A19 (daily series).** The equity series has one point per trading day from
+  the first execution date.
+- **A20 (costs and trades).** A rebalance that changes holdings produces
+  trades and non-zero costs; `costs_total` equals the sum of trade costs and
+  turnover is non-zero.
+- **A21 (status honesty).** `succeeded` is reported only when every scheduled
+  rebalance was scored from the declared data source; interim limitations
+  (`universe_not_point_in_time`) appear as flags.
+- **A22 (mode gating).** `POST` for a mode with `enabled: false` returns 409;
+  `full` stays disabled until gate G3, `trailing` until G2.
+- **A23 (config alignment).** The code reads `modes.<mode>`; no reference to
+  `selection_mode` remains; the disclaimer comes from config.
+- **A24 (milestone gates).** Each milestone's gate tests (§25) pass in CI before
+  the next milestone starts.
 
 ## 21. Open decisions (recommended default in bold)
 
-1. **D1** `full` mode: **on demand only, per run** (not automatic).
+1. **D1** `full` mode: **on demand only, per run**.
 2. **D2** Cache backend: **DB table `market_data_cache`** vs Parquet files.
 3. **D3** Risk-free rate for Sharpe: **0** vs a T-bill series.
 4. **D4** Execution price: **rebalance-date close** vs next open.
 5. **D5** Delisting: **last price, then cash**.
-6. **D6** ETF holdings source: **FMP date-based holdings**, with N-PORT-based
-   disclosures as fallback (60-day lag).
-7. **D7** Widening retries in the backtest: **mirror the live graph** (max 2).
+6. **D6** ETF holdings source for M3: **FMP date-based holdings**, with
+   N-PORT-based disclosures as fallback (60-day lag).
+7. **D7** Widening retries: **mirror the live graph** (max 2).
 8. **D8** Money-flow formula: **CLV-weighted volume**, vs up/down volume.
 9. **D9** Benchmarks shown by default: **QQQ plus SPY, theme-ETF and universe
-   baselines available in the selector**.
+   baselines in the selector**.
 10. **D10** Compliance wording for hypothetical performance.
-11. **D11** `gics_subindustry` uses the current classification (small
-    look-ahead, accepted and disclosed).
-12. **D12** Insufficient-universe policy: **hold cash** vs carry previous
-    basket.
+11. **D11** `gics_subindustry` uses the current classification (disclosed).
+12. **D12** Insufficient-universe policy: **hold cash** vs carry previous basket.
+13. **D13** Stub results: **never persisted or shown in production**; allowed
+    in dev with a banner.
+14. **D14** M2 interim universe (today's ETF holdings): **allowed for
+    `trailing` only, flagged and labeled; `full` waits for M3**.
+15. **D15** Trading calendar: **dates of the primary benchmark series** vs an
+    exchange-calendar library.
 
 ## 22. VERIFY list
 
-1. `integrations/etf_holdings.py::search_holdings` output shape (does it
-   expose which ETF each hit came from? needed to build `etf_membership`).
-2. `integrations/fmp.py`: price endpoint and adjustment used by
-   `fetch_fmp_prices`; exact definitions of `revenue_growth_yoy` and
-   `eps_growth_yoy`.
-3. FMP endpoint names, parameters, and history depth for: unadjusted,
-   split-adjusted, and total-return-adjusted prices; quarterly statements;
-   historical market cap; dated ETF holdings; plan call limits.
-4. Whether delisted tickers return price history (survivorship).
-5. `check:structure` layer rules for `app/backtest/` and for one agent
-   importing another.
-6. Live graph retry limit (`check_basket_complete`) and `retry_count`
+1. `etf_holdings.py::search_holdings` output shape (does it expose which ETF
+   each hit came from? needed for `etf_membership`).
+2. `fmp.py`: price endpoint and adjustment used by `fetch_fmp_prices`; exact
+   definitions of `revenue_growth_yoy` and `eps_growth_yoy`.
+3. FMP endpoint names, parameters, and history depth for the datasets in §7.2;
+   plan call limits; **dated ETF holdings for 10 sample thematic ETFs over
+   2021–2025**; whether delisted tickers return prices.
+4. `check:structure` rules for `app/backtest/` and for one agent importing
+   another.
+5. Live graph retry limit (`check_basket_complete`) and `retry_count`
    semantics.
-7. Location of the run-execution task (for the auto-trigger) and existing
-   queue/worker configuration.
-8. Existing API conventions (auth/session scoping, pagination, polling).
-9. Task 1 delete flow cascade coverage; Task 3 snapshot availability.
-10. `reference_universe.search_sector("")` row shape for the patched version.
+6. Location of the run-execution task (for auto-trigger) and queue/worker
+   configuration.
+7. Existing API conventions (session scoping, pagination, polling).
+8. Task 1 delete cascade coverage; Task 3 snapshot availability and the exact
+   `mini_url` contract.
+9. `reference_universe.search_sector("")` row shape for the patched version.
+10. `load_yaml` behavior and path resolution for `config/backtest.yaml`.
+11. QQQ price series has no gaps across the tested range (calendar source).
 
 ## 23. Files touched
 
 | Area | Files |
 |---|---|
-| New engine | `app/backtest/{calendar,signals,portfolio,simulate,benchmarks,metrics,types}.py` |
-| New agent | `app/agents/backtest.py` |
-| New integration | `app/integrations/historical_data.py` |
-| Config | `config/backtest.yaml` |
+| Engine | `app/backtest/{calendar,signals,portfolio,simulate,benchmarks,metrics,types}.py` (rewrite `engine.py`, extend `types.py`) |
+| Agent | `app/agents/backtest.py` (rewrite `run_backtest`) |
+| Data stores | `app/integrations/historical_data.py` (`FmpStore`), `app/integrations/historical_data_stub.py` (`StubStore`) |
+| Config | `config/backtest.yaml` (additions in §17) |
 | Data | `app/data/queries.py`, models, migration |
 | Orchestration | Run-completion hook, Celery task, `backtest` queue, worker config |
-| API | Routes, schemas, OpenAPI, export |
-| Frontend | Backtest section (see UI_DESIGN) |
-| Infra | Worker image/queue settings, settings in `app/config.py`, `.env.example` |
-| Structure checks | Layer config for `app/backtest/`; LLM-import guard |
+| API | Routes, schemas, OpenAPI, export, mode gating |
+| Frontend | Backtest section (see UI_DESIGN), "Synthetic data" and "Interim universe" banners |
+| Infra | Worker image/queue settings, `app/config.py`, `.env.example` |
+| Structure checks | Layer config for `app/backtest/`; LLM-import guard; synthetic-data guard (A16) |
 
 ## 24. Documentation updates
 
-`BACKTEST_SKILL.md` (new, beside the other skills); `ARCHITECTURE.md` (new
-agent/job, tables, API, decision log); `CONTEXT.md` (rebalance, signal date,
-point-in-time, look-ahead, hypothetical performance); `CONVENTIONS.md` (layer
-rules); README API table; third-party/data-provider notice.
+`BACKTEST_SKILL.md` (add rules: regenerate-every-rebalance and
+no-fabricated-data; see §26); `TEST_PLAN.md` (add the merge-gate tests in §25,
+update the criteria range to A1–A24); `ARCHITECTURE.md` (new agent/job,
+tables, API, decision log, milestones); `CONTEXT.md` (rebalance, signal date,
+point-in-time, look-ahead, hypothetical performance, stub store);
+`CONVENTIONS.md` (layer rules); README API table; data-provider notice.
+
+## 25. Merge gates
+
+Named tests that must pass in CI. A milestone is complete only when its gate
+passes; code that fails a gate is not described as a backtest.
+
+| Test | Proves | G1 (M1) | G2 (M2) | G3 (M3) |
+|---|---|---|---|---|
+| `test_regenerates_each_rebalance` | Spies see `get_factor_panel`, `compute_factor_scores`, `construct_basket` called once per rebalance with `as_of = signal_date` (I1, A5) | ✔ | ✔ | ✔ |
+| `test_rank_flip_changes_targets` | Fixture where ranks flip between two dates gives different baskets and trades (I2, A6) | ✔ | ✔ | ✔ |
+| `test_trades_equal_deltas` | Post-trade positions match targets; each trade is the delta (A15) | ✔ | ✔ | ✔ |
+| `test_accounting_identities` | Value and attribution identities (A7, A20) | ✔ | ✔ | ✔ |
+| `test_daily_equity_series` | One point per trading day (A19) | ✔ | ✔ | ✔ |
+| `test_benchmark_independence` | Benchmark unaffected by strategy changes; strategy unaffected by benchmark poisoning (I4, A18) | ✔ | ✔ | ✔ |
+| `test_no_synthetic_data` | Static ban on randomness and identifier-derived values outside `StubStore`/fixtures (I3, A16) | ✔ | ✔ | ✔ |
+| `test_stub_results_labeled_and_rejected` | `data_source`, `allow_stub_results`, UI banner flag (A17) | ✔ | ✔ | ✔ |
+| `test_canary_no_lookahead` | Poisoned future data changes nothing (I5, A3) | ✔ | ✔ | ✔ |
+| `test_parity_scoring` | Backtest scoring equals live functions (A4) | ✔ | ✔ | ✔ |
+| `test_agents_untouched` | No existing agent file in the diff (A1) | ✔ | ✔ | ✔ |
+| `test_no_llm_import` and `test_engine_purity` | A2 | ✔ | ✔ | ✔ |
+| `test_mode_gating_and_config_alignment` | 409 when disabled; no `selection_mode` (A22, A23) | ✔ | ✔ | ✔ |
+| `test_status_honesty` | `succeeded` only when all rebalances scored; flags present (I6, A21) | ✔ | ✔ | ✔ |
+| `test_fmp_store_point_in_time` | Price, statement, market-cap, and holdings views obey `as_of` on recorded fixtures | | ✔ | ✔ |
+| `test_interim_universe_flag` | `universe_not_point_in_time` present at M2 | | ✔ | |
+| `test_dated_etf_holdings` | Snapshots, age and lag rules; breadth varies by date | | | ✔ |
+| Live smoke (opt-in) | Real FMP fetch matches fixture schema | | ✔ | ✔ |
+
+Gates:
+
+- **G1 (end of M1):** real loop on the stub store; all G1 tests green; results
+  labeled stub.
+- **G2 (end of M2):** real prices and fundamentals; `trailing.enabled` may be
+  switched on with the interim-universe flag.
+- **G3 (end of M3):** point-in-time ETF holdings; `full.enabled` may be
+  switched on; interim flag removed.
+
+## 26. Appendix — disposition of the v1 implementation
+
+| Observation in the delivered code | Problem | Disposition |
+|---|---|---|
+| `simulate_full_history` builds returns from `ord()` sums and `random.gauss`, 20 dates | Fabricated data (I3) | **Delete.** Replace with the real loop (§5.1) |
+| `simulate_from_closes` applies today's basket to stored K-line bars (126 days) | Hindsight replay, no regeneration (I1) | **Delete from the backtest path.** The stored bars remain for the holdings table only |
+| `benchmarks: {"QQQ": {"total_return": total_return}}` | Benchmark copied from strategy (I4) | Compute from `store.benchmark_prices` |
+| Returns and attribution use first-date weights, no trades, costs, or turnover | I2, A20 | Replace with `simulate()` (§10) |
+| Single rebalance entry and 20 synthetic rebalance rows in full mode | A6 | One real `RebalanceResult` per rebalance |
+| `_common_dates` intersection across holdings | Drops dates when any holding lacks a bar | Use benchmark trading days; handle gaps per §10 |
+| Volatility uses population variance | Inconsistent with §12 | Sample standard deviation |
+| `config.get("selection_mode")` | Key not in `backtest.yaml` | Use `modes.<mode>`; mode from the argument (A23) |
+| Disclaimer hard-coded in `run_backtest` | Drift from config | Read `disclaimer` from config |
+| `mini_url = /runs/{run_id}/klines/...` | Missing `/api` prefix versus Task 3 | Use `/api/runs/{run_id}/klines/{ticker}/mini.svg` |
+| Parts to keep | | `current_holdings` assembly (move to `build_current_holdings`), drawdown and Sharpe formulas after fixing the alignment, the dataclass shape (extend with `trades`, benchmark series, `data_source`, `costs_total`, versions) |
+
+Add to `BACKTEST_SKILL.md`:
+
+- **Rule 15 — Regenerate and retarget at every rebalance.** The scoring and
+  selection pipeline runs once per rebalance on as-of data; the portfolio is
+  traded to each new target. A basket is never reused across dates, and the
+  live basket is never used for historical dates.
+- **Rule 16 — No fabricated data.** Nothing outside `StubStore` and test
+  fixtures may use randomness, identifier-derived numbers, or placeholder
+  returns. Stub results are labeled and blocked in production.

@@ -123,6 +123,9 @@ as a layer that may not import `integrations/`, `data/`, or `agents/`.
 14. **Cache first, budget always.** Read from the cache before calling FMP.
     Count FMP calls per job and stop with `DATA_BUDGET_EXCEEDED` when the
     configured budget is reached (partial results allowed).
+15. **Regenerate and retarget at every rebalance.** The scoring and selection pipeline runs once per rebalance on as-of data; the portfolio is traded to each new target. A basket is never reused across dates, and the live basket is never used for historical dates.
+16. **No fabricated data.** Nothing outside StubStore and test fixtures may use randomness, identifier-derived numbers, or placeholder returns. Stub results are labeled and blocked in production.
+
 
 ## Reference implementation (sketch; align names with the real modules)
 
