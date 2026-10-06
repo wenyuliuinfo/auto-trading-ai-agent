@@ -117,6 +117,29 @@ The following is the Live Auto Trading AI Agent screen capture.
   bridge; database startup adds `reports.report_data` and creates
   `run_klines`; new K-line environment variables were added.
 
+## Updates (v3.0 → v3.1)
+
+- **Backtest agent and engine** — added a deterministic historical replay
+  of the Screener, Modeling, and Trader pipeline. Each scheduled rebalance
+  regenerates the basket from point-in-time data, substitutes thematic and
+  sentiment signals with ETF breadth and money-flow ratio, simulates a
+  $10K portfolio with trades and costs, and produces metrics, attribution,
+  and benchmark comparisons.
+- **Backtest UI** — added a Backtest tab with summary cards, equity and
+  drawdown charts, rebalance timeline, current holdings table, contribution
+  bars, trade blotter, progress/failure states, and export controls.
+- **Backtest API and persistence** — added backtest trigger/status/trades/
+  export endpoints plus new `backtest_runs`, `backtest_rebalances`,
+  `backtest_equity`, and `backtest_trades` tables.
+- **Historical data stores** — added the `FmpStore` and deterministic
+  `StubStore` point-in-time data layer, including dated ETF holdings,
+  cached FMP fetches, call budgeting, and seed-holdings fallbacks.
+- **Infrastructure** — added the dedicated `celery-backtest` worker with a
+  single-concurrency queue and a `config/backtest.yaml` policy file.
+- **Report refinements** — added an LLM-generated basket-level risk summary,
+  surfaced the theme name in structured report data, and allowed analyst
+  JSON completion without a fixed response schema.
+
 ## Tech Stack
 
 | Layer | Technology |
