@@ -24,8 +24,6 @@ methodology_version: 1
 enabled: true
 auto_trigger_trailing: false   # set true after staging review (PLAN Step 13)
                                # `full` mode is never automatic (SPEC D1)
-selection_mode: full           # trailing | full; used when the caller does not
-                               # explicitly pass a mode query parameter
 
 # --- Schedule ---------------------------------------------------------------
 schedule:
@@ -35,10 +33,12 @@ schedule:
 
 modes:
   trailing:
+    enabled: true
     completed_periods: 4               # most recent completed holding periods
     include_in_progress_period: true
     min_partial_hold_days: 10          # trading days before an in-progress period counts
   full:
+    enabled: false
     start: 2021-01-01                  # first rebalance = first trading day on/after
     end: 2025-12-31                    # final period is truncated here if needed
     data_buffer_years: 2               # fetch history this long before the first signal
@@ -80,6 +80,7 @@ universe:
 
 # --- Data layer -------------------------------------------------------------
 data:
+  allow_stub_results: false
   provider: fmp
   cache_backend: db                    # db | parquet (SPEC D2)
   cache_table: market_data_cache
