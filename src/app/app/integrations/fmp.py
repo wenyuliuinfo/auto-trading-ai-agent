@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import date, timedelta
 from typing import Any
 
@@ -16,6 +18,9 @@ logger = get_logger(__name__)
 
 FMP_BASE_URL = "https://financialmodelingprep.com/stable"
 FMP_TIMEOUT_SECONDS = 30.0
+FMP_REQUESTS_PER_SECOND = 3.0
+_RATE_LIMIT_LOCK = threading.Lock()
+_LAST_REQUEST_AT = 0.0
 
 
 def _as_float(value: Any) -> float | None:
@@ -31,6 +36,17 @@ def _as_list(payload: Any) -> list[Any]:
     if isinstance(payload, list):
         return payload
     return [payload] if isinstance(payload, dict) else []
+
+
+def _throttle() -> None:
+    """Space out FMP calls to stay below the plan's burst limit."""
+    global _LAST_REQUEST_AT
+    interval = 1.0 / FMP_REQUESTS_PER_SECOND
+    with _RATE_LIMIT_LOCK:
+        wait = interval - (time.monotonic() - _LAST_REQUEST_AT)
+        if wait > 0:
+            time.sleep(wait)
+        _LAST_REQUEST_AT = time.monotonic()
 
 
 def _first(payload: Any) -> dict[str, Any]:
@@ -56,14 +72,24 @@ def _get_json(
     client: httpx.Client, endpoint: str, params: dict[str, Any], api_key: str
 ) -> Any:
     """GET one stable FMP endpoint and fail on empty list responses."""
-    response = client.get(
-        f"{FMP_BASE_URL}{endpoint}", params={**params, "apikey": api_key}
-    )
-    response.raise_for_status()
-    data = response.json()
-    if isinstance(data, list) and not data:
-        raise RuntimeError(f"FMP returned no data for {endpoint}")
-    return data
+    last_status = 0
+    for attempt in range(3):
+        _throttle()
+        response = client.get(
+            f"{FMP_BASE_URL}{endpoint}", params={**params, "apikey": api_key}
+        )
+        last_status = response.status_code
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            delay = float(retry_after) if retry_after else 2**attempt
+            time.sleep(delay)
+            continue
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, list) and not data:
+            raise RuntimeError(f"FMP returned no data for {endpoint}")
+        return data
+    raise RuntimeError(f"FMP rate limit exceeded (HTTP {last_status})")
 
 
 def fetch_fmp_fundamentals(ticker: str) -> dict[str, Any]:
@@ -184,17 +210,16 @@ def fetch_fmp_prices(ticker: str, lookback_days: int = 504) -> PriceHistory:
     end = date.today()
     start = end - timedelta(days=int(lookback_days * 1.9) + 90)
     with httpx.Client(timeout=FMP_TIMEOUT_SECONDS) as client:
-        response = client.get(
-            f"{FMP_BASE_URL}/historical-price-eod/light",
-            params={
+        rows = _get_json(
+            client,
+            "/historical-price-eod/light",
+            {
                 "symbol": ticker,
                 "from": start.isoformat(),
                 "to": end.isoformat(),
-                "apikey": settings.fmp_api_key,
             },
+            settings.fmp_api_key,
         )
-        response.raise_for_status()
-        rows = response.json()
     if not rows:
         raise RuntimeError(f"FMP returned no price history for {ticker}")
     frame = pd.DataFrame(rows)

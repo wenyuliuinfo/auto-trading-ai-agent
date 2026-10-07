@@ -53,6 +53,17 @@ def fetch_stooq_prices(ticker: str, lookback_days: int = 504) -> PriceHistory:
     raise RuntimeError(f"Stooq returned no data for {ticker}") from last_error
 
 
+def _unavailable_price_history(ticker: str) -> PriceHistory:
+    """Return an explicit NaN row when every price source is exhausted."""
+    index = pd.DatetimeIndex([pd.Timestamp.today().normalize()])
+    return PriceHistory(
+        ticker=ticker,
+        close=pd.Series([float("nan")], index=index),
+        volume=pd.Series([0.0], index=index),
+        source="unavailable",
+    )
+
+
 def fetch_price_history(ticker: str, lookback_days: int = 504) -> PriceHistory:
     """FMP EOD primary, yfinance fallback, Stooq last resort."""
     settings = get_settings()
@@ -67,4 +78,8 @@ def fetch_price_history(ticker: str, lookback_days: int = 504) -> PriceHistory:
         return fetch_yfinance_prices(ticker, lookback_days)
     except Exception as exc:
         logger.warning("yfinance_failed", ticker=ticker, error=str(exc))
+    try:
         return fetch_stooq_prices(ticker, lookback_days)
+    except Exception as exc:
+        logger.warning("price_sources_exhausted", ticker=ticker, error=str(exc))
+        return _unavailable_price_history(ticker)

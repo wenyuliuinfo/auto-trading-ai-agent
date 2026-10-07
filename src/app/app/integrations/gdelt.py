@@ -27,8 +27,18 @@ def fetch_gdelt(ticker: str, lookback_days: int = 90) -> list[dict[str, Any]]:
     try:
         response = httpx.get(GDELT_API_URL, params=params, timeout=30.0)
         response.raise_for_status()
+        text = response.text.strip()
+        if not text:
+            logger.info("gdelt_empty_response", ticker=ticker)
+            return []
         data = cast(dict[str, Any], response.json())
+        if not isinstance(data, dict):
+            logger.info("gdelt_unexpected_shape", ticker=ticker)
+            return []
         return cast(list[dict[str, Any]], data.get("articles", []))
+    except ValueError as exc:
+        logger.info("gdelt_non_json_response", ticker=ticker, error=str(exc))
+        return []
     except Exception as exc:
         logger.warning("gdelt_fetch_failed", ticker=ticker, error=str(exc))
         return []

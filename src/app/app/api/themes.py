@@ -41,7 +41,7 @@ async def post_theme(payload: ThemeCreateRequest) -> ThemeResponse:
         "max_per_sub_industry": (
             payload.screens.max_per_sub_industry
             if payload.screens and payload.screens.max_per_sub_industry is not None
-            else 3
+            else 5
         ),
     }
     config = {

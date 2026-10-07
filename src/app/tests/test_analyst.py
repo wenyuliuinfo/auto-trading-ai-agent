@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.agents.analyst import (
+    _coerce_string_list,
     _normalize_sentiment_label,
     analyst_node,
     estimate_revenue_pct_theme,
@@ -37,6 +38,17 @@ def test_normalize_sentiment_label_maps_synonyms() -> None:
     assert _normalize_sentiment_label({"sentiment_label": "negative"})["sentiment_label"] == "bearish"
     assert _normalize_sentiment_label({"sentiment_label": "Bullish"})["sentiment_label"] == "bullish"
     assert _normalize_sentiment_label({"sentiment_label": "neutral"})["sentiment_label"] == "neutral"
+
+
+def test_coerce_string_list_normalizes_none_and_dicts() -> None:
+    assert _coerce_string_list(None) == []
+    assert _coerce_string_list("single") == ["single"]
+    assert _coerce_string_list(
+        [{"event": "Q3 earnings", "source": "10-Q"}]
+    ) == ["Q3 earnings (source: 10-Q)"]
+    assert _coerce_string_list([{"risk": "customer concentration"}]) == [
+        "customer concentration"
+    ]
 
 
 @pytest.mark.asyncio

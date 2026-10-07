@@ -90,15 +90,40 @@ def get_business_description(ticker: str) -> dict[str, Any]:
             "form": "stub",
         }
     try:
-        filing = fetch_sec_edgar_filing(ticker, form_types=["10-K", "10-Q"])
-        return {
-            "business_description": filing["item_1_text"],
-            "segment_revenue": filing["segment_revenue"],
-            "form": filing["form"],
-        }
+        filing = _fetch_with_form_fallbacks(ticker)
     except Exception as exc:
         logger.warning("sec_edgar_failed", ticker=ticker, error=str(exc))
         return {"business_description": None, "segment_revenue": None, "form": None}
+    if filing is None:
+        return {"business_description": None, "segment_revenue": None, "form": None}
+    return {
+        "business_description": filing["item_1_text"],
+        "segment_revenue": filing["segment_revenue"],
+        "form": filing["form"],
+    }
+
+
+def _fetch_with_form_fallbacks(ticker: str) -> dict[str, Any] | None:
+    """Try domestic filing types first, then foreign-private-issuer forms."""
+    for form_types in (["10-K", "10-Q"], ["20-F"], ["6-K"]):
+        try:
+            return fetch_sec_edgar_filing(ticker, form_types)
+        except RuntimeError as exc:
+            if "no CIK found" in str(exc):
+                raise
+            if "no " not in str(exc):
+                raise
+            logger.info(
+                "sec_edgar_form_unavailable",
+                ticker=ticker,
+                form_types=form_types,
+            )
+    logger.warning(
+        "sec_edgar_failed",
+        ticker=ticker,
+        error="no supported filing found (tried 10-K, 10-Q, 20-F, 6-K)",
+    )
+    return None
 
 
 def estimate_revenue_pct_theme(

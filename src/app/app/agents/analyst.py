@@ -104,6 +104,66 @@ def _coerce_revenue_pct(value: Any) -> float | None:
     return None
 
 
+def _stringify_list_item(value: Any) -> str:
+    """Flatten LLM objects such as {event/risk/evidence, source} to strings."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        primary_key = next(
+            (key for key in ("event", "risk", "evidence", "description") if key in value),
+            None,
+        )
+        if primary_key is not None:
+            text = str(value.get(primary_key) or "")
+        else:
+            text = " ".join(str(part) for part in value.values() if part is not None)
+        source = value.get("source")
+        if source:
+            text = f"{text} (source: {source})"
+        return text or str(value)
+    return str(value)
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    """Coerce null, scalar, and dict-valued LLM outputs to list[str]."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list | tuple):
+        return [_stringify_list_item(item) for item in value]
+    return [str(value)]
+
+
+def _coerce_news_list(value: Any) -> list[dict[str, str]]:
+    """Coerce the LLM's news field into the Report schema's dict shape."""
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, str]] = []
+    for item in value:
+        if isinstance(item, str):
+            result.append(
+                {
+                    "headline": item,
+                    "url": "",
+                    "source": "",
+                    "published_at": "",
+                    "summary": "",
+                }
+            )
+        elif isinstance(item, dict):
+            result.append(
+                {
+                    "headline": str(item.get("headline") or item.get("title") or ""),
+                    "url": str(item.get("url") or ""),
+                    "source": str(item.get("source") or ""),
+                    "published_at": str(item.get("published_at") or ""),
+                    "summary": str(item.get("summary") or ""),
+                }
+            )
+    return result
+
+
 def _stub_report(
     ticker: str, theme: str, sub_exposures: list[str]
 ) -> dict[str, Any]:
@@ -218,6 +278,13 @@ async def analyst_node(state: dict[str, Any]) -> dict[str, Any]:
         report_data["revenue_pct_theme_estimate"] = _coerce_revenue_pct(
             report_data.get("revenue_pct_theme_estimate")
         )
+        report_data["catalysts"] = _coerce_string_list(report_data.get("catalysts"))
+        report_data["risks"] = _coerce_string_list(report_data.get("risks"))
+        report_data["sentiment_evidence"] = _coerce_string_list(
+            report_data.get("sentiment_evidence")
+        )
+        report_data["sources"] = _coerce_string_list(report_data.get("sources"))
+        report_data["news"] = _coerce_news_list(report_data.get("news"))
         report = AnalystReport.model_validate(report_data)
         await save_analyst_report(run_id, report.model_dump())
         return {"analyst_reports": [report.model_dump()]}

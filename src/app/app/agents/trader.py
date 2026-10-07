@@ -66,7 +66,7 @@ def construct_basket(
     screens = theme_config.get("screens", {})
     min_cap = float(screens.get("min_market_cap", 300_000_000))
     min_adv = float(screens.get("min_avg_dollar_volume", 5_000_000))
-    max_per_sub = int(screens.get("max_per_sub_industry", 3))
+    max_per_sub = int(screens.get("max_per_sub_industry", 5))
 
     eligible = [
         candidate

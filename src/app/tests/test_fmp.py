@@ -10,6 +10,8 @@ from app.integrations.fmp import fetch_fmp_fundamentals, fetch_fmp_prices
 class FakeResponse:
     def __init__(self, payload: object) -> None:
         self._payload = payload
+        self.status_code = 200
+        self.headers: dict[str, str] = {}
 
     def raise_for_status(self) -> None:
         return None

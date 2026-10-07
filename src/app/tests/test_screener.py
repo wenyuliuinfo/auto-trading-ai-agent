@@ -38,5 +38,26 @@ def test_unmapped_sub_exposure_returns_empty_holdings() -> None:
     assert search_holdings("not_a_real_sub_exposure_xyz") == []
 
 
-def test_max_candidates_is_100() -> None:
-    assert MAX_CANDIDATES == 100
+def test_max_candidates_is_50() -> None:
+    assert MAX_CANDIDATES == 50
+
+
+def test_etf_hit_missing_adv_is_enriched_from_reference_universe(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.agents.screener.search_sector",
+        lambda keyword: [
+            {
+                "ticker": "AAPL",
+                "company_name": "Apple Inc.",
+                "gics_subindustry": "Technology Hardware",
+                "market_cap": 3_400_000_000_000.0,
+                "avg_dollar_volume": 18_000_000_000.0,
+            }
+        ],
+    )
+    candidates, _ = assemble_candidate_universe(
+        {"hardware": [{"ticker": "AAPL"}]}
+    )
+    assert candidates[0]["avg_dollar_volume"] == 18_000_000_000.0

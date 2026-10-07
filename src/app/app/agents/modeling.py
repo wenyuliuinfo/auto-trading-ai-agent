@@ -306,6 +306,19 @@ async def modeling_node(state: dict[str, Any]) -> dict[str, Any]:
     if not reports:
         raise RuntimeError("modeling_node received no valid analyst reports")
 
+    # LangGraph's analyst fan-out can replay a ticker and append duplicate
+    # reports into ``analyst_reports``. Deduplicate before scoring so one
+    # stock cannot consume multiple ranks.
+    unique_reports: list[dict[str, Any]] = []
+    seen_tickers: set[str] = set()
+    for report in reports:
+        ticker = str(report["ticker"]).upper()
+        if ticker in seen_tickers:
+            continue
+        seen_tickers.add(ticker)
+        unique_reports.append(report)
+    reports = unique_reports
+
     theme_config = state["theme_config"]
     weights = theme_config["factor_weights"]
     if not isinstance(weights, dict):

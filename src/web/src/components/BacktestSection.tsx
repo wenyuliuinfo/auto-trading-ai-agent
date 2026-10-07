@@ -558,7 +558,7 @@ export function BacktestSection({ runId }: BacktestSectionProps) {
               onClick={() => setMode(item)}
               aria-pressed={mode === item}
             >
-              {item === "trailing" ? "Trailing" : "Full 2021–2025"}
+              {item === "trailing" ? "Trailing" : "Full"}
             </button>
           ))}
         </div>

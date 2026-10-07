@@ -15,8 +15,8 @@ from app.logging_conf import get_logger
 
 logger = get_logger(__name__)
 
-MIN_CANDIDATES = 50
-MAX_CANDIDATES = 100
+MIN_CANDIDATES = 30
+MAX_CANDIDATES = 50
 
 SCREENER_SYSTEM_PROMPT = """You are a Universe Screener for a thematic equity research desk. Your job is
 to convert an investment theme into a bounded, verifiable list of candidate
@@ -82,6 +82,8 @@ def enrich_with_market_cap(candidates: list[dict[str, Any]]) -> list[dict[str, A
             candidate["gics_subindustry"] = row.get("gics_subindustry")
         if candidate.get("market_cap") is None and row is not None:
             candidate["market_cap"] = row.get("market_cap")
+        if candidate.get("avg_dollar_volume") is None and row is not None:
+            candidate["avg_dollar_volume"] = row.get("avg_dollar_volume")
     return candidates
 
 
@@ -106,6 +108,17 @@ def assemble_candidate_universe(
             ticker = str(hit["ticker"]).upper()
             if ticker not in merged:
                 merged[ticker] = {**hit, "ticker": ticker, "sub_exposure_tags": set()}
+            else:
+                # Later sector hits can supply liquidity/name fields that ETF
+                # holdings rows do not carry.
+                for key in (
+                    "company_name",
+                    "gics_subindustry",
+                    "market_cap",
+                    "avg_dollar_volume",
+                ):
+                    if merged[ticker].get(key) is None and hit.get(key) is not None:
+                        merged[ticker][key] = hit[key]
             merged[ticker]["sub_exposure_tags"].add(sub_exposure)
 
     candidates = enrich_with_market_cap(list(merged.values()))
@@ -180,7 +193,7 @@ async def screener_node(state: dict[str, Any]) -> dict[str, Any]:
     theme_config = state["theme_config"]
     sub_exposures = list(theme_config.get("sub_exposures", []))
     retry_count = int(state.get("retry_count", 0))
-    max_candidates = MAX_CANDIDATES + 100 * retry_count
+    max_candidates = MAX_CANDIDATES
 
     if stubbing_enabled():
         hits = _stub_sub_exposure_hits(sub_exposures)

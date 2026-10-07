@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
 import httpx
@@ -9,6 +11,9 @@ import httpx
 from app.config import get_settings
 
 FINNHUB_BASE_URL = "https://finnhub.io/api/v1"
+FINNHUB_REQUESTS_PER_SECOND = 1.0
+_RATE_LIMIT_LOCK = threading.Lock()
+_LAST_REQUEST_AT = 0.0
 
 
 def _number(value: Any) -> float | None:
@@ -20,28 +25,60 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _throttle() -> None:
+    """Space out Finnhub calls to avoid free-tier 429 responses."""
+    global _LAST_REQUEST_AT
+    interval = 1.0 / FINNHUB_REQUESTS_PER_SECOND
+    with _RATE_LIMIT_LOCK:
+        wait = interval - (time.monotonic() - _LAST_REQUEST_AT)
+        if wait > 0:
+            time.sleep(wait)
+        _LAST_REQUEST_AT = time.monotonic()
+
+
+def _get_json_with_retry(
+    client: httpx.Client, url: str, params: dict[str, str]
+) -> dict[str, Any]:
+    """GET Finnhub, retrying transient 429 responses with backoff."""
+    last_status = 0
+    for attempt in range(3):
+        _throttle()
+        response = client.get(url, params=params)
+        last_status = response.status_code
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            delay = float(retry_after) if retry_after else 2**attempt
+            time.sleep(delay)
+            continue
+        response.raise_for_status()
+        payload = response.json()
+        if isinstance(payload, dict):
+            return payload
+        return {}
+    raise RuntimeError(f"Finnhub rate limit exceeded (HTTP {last_status})")
+
+
 def fetch_finnhub_fundamentals(ticker: str) -> dict[str, Any]:
     """Fetch normalized fundamentals from Finnhub quote + metric endpoints."""
     settings = get_settings()
     if not settings.finnhub_api_key:
         raise RuntimeError("FINNHUB_API_KEY is not configured")
     with httpx.Client(timeout=30.0) as client:
-        quote_response = client.get(
+        quote = _get_json_with_retry(
+            client,
             f"{FINNHUB_BASE_URL}/quote",
-            params={"symbol": ticker, "token": settings.finnhub_api_key},
+            {"symbol": ticker, "token": settings.finnhub_api_key},
         )
-        quote_response.raise_for_status()
-        quote = quote_response.json()
-        metric_response = client.get(
+        metric_response = _get_json_with_retry(
+            client,
             f"{FINNHUB_BASE_URL}/stock/metric",
-            params={
+            {
                 "symbol": ticker,
                 "metric": "all",
                 "token": settings.finnhub_api_key,
             },
         )
-        metric_response.raise_for_status()
-        metric = (metric_response.json() or {}).get("metric", {})
+        metric = metric_response.get("metric", {})
     market_cap = _number(metric.get("marketCapitalization"))
     revenue_growth = _number(metric.get("revenueGrowthTTMYoy"))
     eps_growth = _number(metric.get("epsGrowthTTMYoy"))

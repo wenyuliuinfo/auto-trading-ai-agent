@@ -10,6 +10,8 @@ from app.integrations.finnhub import fetch_finnhub_fundamentals
 class FakeResponse:
     def __init__(self, payload: object) -> None:
         self._payload = payload
+        self.status_code = 200
+        self.headers: dict[str, str] = {}
 
     def raise_for_status(self) -> None:
         return None
