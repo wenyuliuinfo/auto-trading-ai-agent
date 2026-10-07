@@ -74,27 +74,33 @@ The following is the Live Auto Trading AI Agent screen capture.
 </p>
 
 <p align="center">
-  <img src="docs/images/auto-trading-agent-basket.png" alt="Auto Trading Basket page" width="900">
+  <img src="docs/images/auto-trading-agent-basket-v3.1.png" alt="Auto Trading Basket page" width="900">
 </p>
 
 <p align="center">
-  <img src="docs/images/auto-trading-agent-report-v3.0.png" alt="Auto Trading Report page" width="900">
+  <img src="docs/images/auto-trading-agent-ranking-v3.1.png" alt="Auto Trading Ranking page" width="900">
 </p>
 
 <p align="center">
-  <img src="docs/images/auto-trading-agent-backtest1.png" alt="Auto Trading Backtest 1 page" width="900">
+  <img src="docs/images/auto-trading-agent-report-v3.1.png" alt="Auto Trading Report page" width="900">
 </p>
 
 <p align="center">
-  <img src="docs/images/auto-trading-agent-backtest2.png" alt="Auto Trading Backtest 2 page" width="900">
+  <img src="docs/images/auto-trading-agent-backtest1-v3.1.png" alt="Auto Trading Backtest 1 page" width="900">
 </p>
 
 <p align="center">
-  <img src="docs/images/auto-trading-agent-backtest3.png" alt="Auto Trading Backtest 3 page" width="900">
+  <img src="docs/images/auto-trading-agent-backtest2-v3.1.png" alt="Auto Trading Backtest 2 page" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/images/auto-trading-agent-backtest3-v3.1.png" alt="Auto Trading Backtest 3 page" width="900">
 </p>
 
 
-## Updates (v2.2 → v3.0)
+## Updates (v2.2 → v3.1)
+
+#### v2.2 → v3.0
 
 - **Modeling factors** — added `volatility` and `liquidity` to the
   deterministic composite score. New raw factors are `vol_3m`,
@@ -117,7 +123,8 @@ The following is the Live Auto Trading AI Agent screen capture.
   bridge; database startup adds `reports.report_data` and creates
   `run_klines`; new K-line environment variables were added.
 
-## Updates (v3.0 → v3.1)
+
+#### v3.0 → v3.1
 
 - **Backtest agent and engine** — added a deterministic historical replay
   of the Screener, Modeling, and Trader pipeline. Each scheduled rebalance
