@@ -48,7 +48,7 @@
         },
         "max_per_sub_industry": {
           "type": "integer",
-          "default": 3,
+          "default": 5,
           "description": "Diversification cap — max basket positions from one GICS sub-industry."
         }
       }
